@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chatbot</title>
+    <link rel="stylesheet" href="../static/styles.css" />
+
+    <style>
+      @keyframes typing {
+        from {
+          width: 0;
+        }
+        to {
+          width: 100%;
+        }
+      }
+
+      @keyframes blink-caret {
+        from,
+        to {
+          border-color: transparent;
+        }
+        50% {
+          border-color: black;
+        }
+      }
+      .typing {
+        overflow: hidden; /* Ensures the content is not revealed until the animation is complete */
+        white-space: nowrap; /* Keeps the text on a single line */
+      }
+      .received {
+        white-space: normal; /* Allows text to wrap */
+        word-wrap: break-word; /* Ensures words wrap to next line if needed */
+      }
+      body {
+        font-family: Arial, sans-serif;
+        background-size: cover;
+        background-repeat: no-repeat;
+        background-position: center;
+        margin: 0;
+        padding: 20px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        overflow: hidden;
+        background-color: rgba(0, 0, 0, 0.5);
+      }
+      body::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: url("") center center no-repeat;
+        background-size: cover;
+        opacity: 0.4;
+        z-index: -1;
+      }
+      .chat-container {
+        width: 360px;
+        height: 80vh;
+        background-color: white;
+        box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+        border-radius: 8px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      #messages {
+        list-style: none;
+        padding: 20px;
+        overflow-y: auto;
+        height: calc(80vh - 60px);
+        margin: 0;
+      }
+      #messages li {
+        margin-bottom: 10px;
+        border-radius: 20px;
+        padding: 10px 20px;
+        color: white;
+        line-height: 1.4;
+      }
+      #messages li.sent {
+        background-color: #0b93f6;
+        align-self: flex-end;
+        max-width: 80%;
+      }
+      #messages li.received {
+        background-color: #e5e5ea;
+        color: black;
+        align-self: flex-start;
+        max-width: 80%;
+      }
+      form {
+        display: flex;
+        padding: 10px;
+        border-top: 1px solid #ccc;
+      }
+      input[type="text"],
+      input[type="file"] {
+        flex: 1;
+        padding: 10px;
+        margin-right: 5px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+      button {
+        padding: 10px 20px;
+        background-color: #0b93f6;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+      #uploadForm {
+        display: none;
+        justify-content: space-between;
+        padding: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="chat-container">
+      <ul id="messages"></ul>
+      <form id="messageForm" onsubmit="sendMessage(event)">
+        <input
+          type="text"
+          id="messageText"
+          autocomplete="off"
+          placeholder="Type your message..."
+        />
+        <button type="submit">Send</button>
+      </form>
+      <form id="uploadForm">
+        <input type="file" id="file" name="file" accept=".wav, .mp3" required />
+        <button type="button" onclick="uploadFile()">Upload</button>
+      </form>
+    </div>
+
+    <script>
+      // Function to change background image URL
+      function changeBackgroundImage(url) {
+        var styleElement = document.getElementById("dynamic-background-style");
+        if (!styleElement) {
+          styleElement = document.createElement("style");
+          document.head.appendChild(styleElement);
+          styleElement.id = "dynamic-background-style";
+        }
+        styleElement.innerHTML = `body::before { background-image: url('${url}'); }`;
+      }
+
+      var ws = new WebSocket("ws://127.0.0.1:3939/ws");
+
+      var bgr_url = "";
+
+      ws.onopen = function () {
+        console.log("Connected to the WebSocket server");
+      };
+
+      ws.onmessage = function (event) {
+        receiveMessage(event.data);
+      };
+
+      function receiveMessage(message) {
+        console.log("Received message:", message);
+        if (message.startsWith("Background Image URL")) {
+          var bgr_url = message.split("URL: ")[1];
+          changeBackgroundImage(bgr_url);
+        } else {
+          var messages = document.getElementById("messages");
+          var messageElement = document.createElement("li");
+          messageElement.classList.add("received", "typing");
+          messages.appendChild(messageElement);
+
+          // Here is where you set the initial content
+          messageElement.innerHTML = ""; // Start with empty content
+          let i = 0;
+          const speed = 15; // Adjust the typing speed as needed
+          function typeWriter() {
+            if (i < message.length) {
+              // Only append one character at a time
+              messageElement.innerHTML += message
+                .charAt(i)
+                .replace(/\n/g, "<br>");
+              i++;
+              setTimeout(typeWriter, speed);
+              if (message.includes("VocaDB info:")) {
+                messageElement.classList.remove("typing");
+              }
+            } else {
+              messageElement.classList.remove("typing"); // Remove typing effect after complete
+            }
+            messages.scrollTop = messages.scrollHeight;
+          }
+          typeWriter(); // Start the typing effect
+          messages.appendChild(messageElement);
+          if (message.includes("Please upload your file")) {
+            document.getElementById("uploadForm").style.display = "flex";
+          }
+          if (message.includes("uploading:")) {
+            document.getElementById("uploadForm").style.display = "none";
+          }
+          if (
+            message.includes("Separation Completed. Download will start soon.")
+          ) {
+            addMessageToDisplay(
+              "Separation Completed. Download will start soon."
+            );
+          }
+          if (message.startsWith("Downloading files...")) {
+            window.location.href = "http://127.0.0.1:3939/download/all/";
+          }
+          if (message.includes("An error occurred during separation:")) {
+            addMessageToDisplay(
+              "A specific error occurred, please check the details or try again."
+            );
+          }
+          if (message.startsWith("Background URL:")) {
+            var url = message.split(":")[1].trim(); // Extract the URL
+            console.log("Background URL:", url);
+            changeBackgroundImage(url); // Change background image
+          }
+        }
+        messages.scrollTop = messages.scrollHeight;
+      }
+
+      function sendMessage(event) {
+        var input = document.getElementById("messageText");
+        ws.send(input.value);
+        addMessageToDisplay(input.value, "sent");
+        input.value = "";
+        event.preventDefault();
+        var messages = document.getElementById("messages");
+        messages.scrollTop = messages.scrollHeight;
+      }
+
+      function addMessageToDisplay(text, type) {
+        var messages = document.getElementById("messages");
+        var messageElement = document.createElement("li");
+        messageElement.classList.add(type);
+        messageElement.textContent = text;
+        messages.appendChild(messageElement);
+        messages.scrollTop = messages.scrollHeight;
+      }
+
+      function uploadFile() {
+        var formData = new FormData(document.getElementById("uploadForm"));
+        fetch("/upload/", {
+          method: "POST",
+          body: formData,
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            console.log("Success:", data);
+            var uploadedFilename = data.info.split("'")[1]; // Extract filename from response
+            ws.send("uploaded:" + uploadedFilename); // Notify WebSocket server about the upload
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+          });
+      }
+    </script>
+  </body>
+</html>
