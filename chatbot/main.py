@@ -100,7 +100,7 @@ async def handle_file_upload(file: UploadFile = File(...)):
     # Read the content of the uploaded file
     # Verify the file extension
     file_extension = file.filename.split(".")[-1].lower()
-    if file_extension not in ["wav", "mp3"]:
+    if file_extension not in ["csv", "pdf", "xlsx"]:
         raise HTTPException(status_code=400, detail="Invalid file type")
 
     # Save the file to the FILE_DIR directory
@@ -200,9 +200,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
             await websocket.send_text(f"Title: {title}")
             await websocket.send_text(f"Artist: {artist}")
-            await asyncio.sleep(1.2)
-            await websocket.send_text("Would you like to use VocaDB? (y/n)")
-            await websocket.send_text(f"Background Image URL: {background_image_url}")
 
             using_vocadb = await websocket.receive_text()
 
@@ -215,7 +212,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 try:
                     # title = shazam_search.clean_song_title(title)
-                    search_results = await search_song_vocadb(title)
+                    search_results = 0
                     if not search_results:
                         await websocket.send_text("No matching songs found.")
                         await asyncio.sleep(0.1)
@@ -294,15 +291,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 change_file = False
                 continue  # Go back to choose option
 
-
-async def search_song_vocadb(query: str) -> List[dict]:
-    print(query)
-    url = "https://vocadb.net/api/songs/"
-    params = {"query": query, "fields": "Artists", "lang": "English"}
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        return response.json()["items"]
 
 
 if __name__ == "__main__":
