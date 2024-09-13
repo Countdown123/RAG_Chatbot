@@ -18,6 +18,7 @@ body {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    left: 1000px;
 }
 
 #messages {
