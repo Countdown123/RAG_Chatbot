@@ -14,7 +14,14 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 
+import models
+from database import engine
+models.Base.metadata.create_all(bind=engine)
+from user import user_router
+
 app = FastAPI()
+
+app.include_router(user_router.app, tags=["user"])
 
 # Mount the static directory to serve CSS and JavaScript files
 app.mount("/static", StaticFiles(directory="static"), name="static")
