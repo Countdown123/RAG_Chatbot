@@ -69,29 +69,35 @@ html {
 form {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: center; /* This centers items horizontally */
   width: 100%;
   max-width: 300px;
 }
 
-#label-username,
+#label-email,
 #label-password {
-  align-self: flex-start;
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin: 20px 0 5px 0;
 }
 
+/* Keep the margin-top for spacing */
 #label-password {
   margin-top: 20px;
 }
 
-input[type="text"],
-input[type="password"],
+input[type="email"],
+input[type="password"], 
 .lower-login {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   width: 100%;
   padding: 10px;
   margin: 5px 0;
   box-shadow: none;
-  border: 2px solid;
-  border-color: #a3a3a3;
+  border: 2px solid #a3a3a3;
   border-radius: 10px;
 }
 
@@ -100,7 +106,6 @@ input[type="password"],
   display: flex;
   align-items: center;
   color: #888;
-  /* Updated for better visibility */
   font-size: 14px;
   margin: 8px 0;
   margin-top: 20px;
@@ -113,9 +118,7 @@ input[type="password"],
   flex-grow: 1;
   margin: 0 16px;
   background-color: #ccc;
-  /* Updated for better visibility */
   height: 1px;
-  /* Ensure height is sufficient to be visible */
 }
 
 button.lower-login,

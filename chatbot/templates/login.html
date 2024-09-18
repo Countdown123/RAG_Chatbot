@@ -1,106 +1,111 @@
+<!-- templates/login.html -->
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Login</title>
-    <link rel="stylesheet" href="/static/login.css" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap"
-      rel="stylesheet"
-    />
-  </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login</title>
+  <link rel="stylesheet" href="/static/login.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap"
+    rel="stylesheet"
+  />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap"
+    rel="stylesheet"
+  />
+</head>
+<body>
+  <header class="header">
+    <div class="logo"><a href="/" class="title-logo">SERVICE</a></div>
+  </header>
 
-  <body>
-    <header class="header">
-      <div class="logo"><a href="/" class="title-logo">SERVICE</a></div>
-    </header>
+  <div class="main-content">
+    <h2 class="info">이메일로 로그인</h2>
+    <form id="loginForm">
+      <label for="email" id="label-email">이메일</label>
+      <input
+        type="text"
+        name="username"
+        placeholder="Email"
+        id="email"
+        required
+        pattern="[^@\s]+@[^@\s]+\.[^@\s]+"
+      />
+      <label for="password" id="label-password">비밀번호</label>
+      <input
+        type="password"
+        name="password"
+        placeholder="Password"
+        id="password"
+        required
+      />
+      <button type="submit" class="lower-login">로그인</button>
+    </form>
 
-    <div class="main-content">
-      <h2 class="info">아이디로 로그인</h2>
-      <form id="loginForm">
-        <label for="username" id="label-username">아이디</label>
-        <input
-          type="text"
-          name="username"
-          placeholder="Username"
-          id="username"
-          required
-        />
-        <label for="password" id="label-password">비밀번호</label>
-        <input
-          type="password"
-          name="password"
-          placeholder="Password"
-          id="password"
-          required
-        />
-        <button type="submit" class="lower-login">로그인</button>
-      </form>
+    <div class="line">또는</div>
 
-      <div class="line">또는</div>
+    <form action="/signup.html" method="get">
+      <button type="submit" class="signup">회원가입</button>
+    </form>
 
-      <form action="/signup" method="get">
-        <button type="submit" class="signup">회원가입</button>
-      </form>
+    <form action="/" method="get">
+      <button type="submit" class="reset-password">비밀번호 재설정</button>
+    </form>
+  </div>
 
-      <form action="/" method="get">
-        <button type="submit" class="reset-password">비밀번호 재설정</button>
-      </form>
-    </div>
+  <!-- Updated Script -->
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var loginForm = document.getElementById("loginForm");
+      if (loginForm) {
+        loginForm.addEventListener("submit", async function (event) {
+          event.preventDefault(); // Prevent the form from submitting normally
 
-    <script>
-      document.addEventListener("DOMContentLoaded", function () {
-        var loginForm = document.getElementById("loginForm");
-        if (loginForm) {
-          loginForm.addEventListener("submit", async function (event) {
-            event.preventDefault(); // Prevent the form from submitting normally
+          // Create URLSearchParams to hold form data in application/x-www-form-urlencoded format
+          var formData = new URLSearchParams();
+          formData.append('username', document.getElementById('email').value.trim());
+          formData.append('password', document.getElementById('password').value.trim());
 
-            var username = document.getElementById("username").value;
-            var password = document.getElementById("password").value;
+          try {
+            // Send the login data to the backend
+            let response = await fetch("/token", {
+              method: "POST",
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: formData.toString(),
+            });
 
-            try {
-              // Send the login data to the backend
-              let response = await fetch("/login", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/x-www-form-urlencoded",
+            if (response.ok) {
+              // Handle successful login
+              let data = await response.json();
+              // Store the access token in localStorage
+              localStorage.setItem("accessToken", data.access_token);
+              // Redirect to the main chat page
+              window.location.href = "index.html";
+            } else {
+              // Handle login failure
+              const mainContent = document.querySelector(".main-content");
+              mainContent.classList.add("shake-animation");
+              mainContent.addEventListener(
+                "animationend",
+                function () {
+                  mainContent.classList.remove("shake-animation");
                 },
-                body: new URLSearchParams({
-                  username: username,
-                  password: password,
-                }),
-              });
-
-              if (response.ok) {
-                // Handle successful login
-                window.location.href = "/user_page";
-              } else {
-                // Handle login failure
-                const mainContent = document.querySelector(".main-content");
-                mainContent.classList.add("shake-animation");
-                mainContent.addEventListener(
-                  "animationend",
-                  function () {
-                    mainContent.classList.remove("shake-animation");
-                  },
-                  { once: true }
-                );
-              }
-            } catch (error) {
-              console.error("Error logging in:", error);
+                { once: true }
+              );
             }
-          });
-        } else {
-          console.error("The login form was not found.");
-        }
-      });
-    </script>
-  </body>
+          } catch (error) {
+            console.error("Error logging in:", error);
+          }
+        });
+      } else {
+        console.error("The login form was not found.");
+      }
+    });
+  </script>
+</body>
 </html>

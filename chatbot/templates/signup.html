@@ -1,6 +1,6 @@
+<!-- templates/signup.html -->
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,11 +11,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap" rel="stylesheet" />
 </head>
-
 <body>
   <header class="header">
     <div class="logo"><a href="/" class="title-logo">SERVICE</a></div>
-    <form action="login.html" method="get" class="login-form">
+    <form action="/login.html" method="get" class="login-form">
       <button type="submit" class="upper-login" onmouseover="toggleNavbarColor(true)"
         onmouseout="toggleNavbarColor(false)">
         로그인
@@ -25,10 +24,7 @@
 
   <div class="main-content">
     <h2 class="info">회원가입</h2>
-    <form method="post" action="/signup" class="signupForm">
-      <label for="username" id="label-username">아이디</label>
-      <input type="text" name="username" placeholder="Username" id="username" required />
-
+    <form id="signupForm">
       <label for="email" id="label-email">이메일</label>
       <input type="email" name="email" placeholder="Email" id="email" required />
 
@@ -43,40 +39,49 @@
 
     <div class="line">또는</div>
 
-    <form action="login.html" method="get">
+    <form action="/login.html" method="get">
       <button type="submit" class="lower-login">로그인</button>
     </form>
   </div>
 
-  <script>
-    function toggleNavbarColor(add) {
-      const navbar = document.querySelector(".header");
-      if (add) {
-        navbar.classList.add("navigation-blue");
-      } else {
-        navbar.classList.remove("navigation-blue");
-      }
-    }
-
+<script>
     document.addEventListener("DOMContentLoaded", function () {
-      var signupForm = document.querySelector(".signupForm");
+      var signupForm = document.getElementById("signupForm");
       if (signupForm) {
-        signupForm.addEventListener("submit", function (event) {
-          var password = document.getElementById("password").value;
-          var confirmPassword = document.getElementById("confirm-password").value;
+        signupForm.addEventListener("submit", async function (event) {
+          event.preventDefault();
+
+          var email = document.getElementById("email").value.trim();
+          var password = document.getElementById("password").value.trim();
+          var confirmPassword = document.getElementById("confirm-password").value.trim();
 
           if (password !== confirmPassword) {
-            event.preventDefault(); // Prevent form submission if passwords do not match
-            const mainContent = document.querySelector(".main-content");
-            mainContent.classList.add("shake-animation");
-            mainContent.addEventListener(
-              "animationend",
-              function () {
-                mainContent.classList.remove("shake-animation");
-              },
-              { once: true }
-            );
-            console.error("Passwords do not match.");
+            alert("Passwords do not match.");
+            return;
+          }
+
+          var formData = new FormData();
+          formData.append("email", email);
+          formData.append("password", password);
+          formData.append("confirm_password", confirmPassword);
+
+          try {
+            let response = await fetch("/users/", {
+              method: "POST",
+              body: formData,
+            });
+
+            if (response.ok) {
+              alert("Registration successful! Please log in.");
+              window.location.href = "/login.html";
+            } else {
+              const data = await response.json();
+              console.error("Error Details:", data);
+              alert("Error: " + (data.detail || "Registration failed."));
+            }
+          } catch (error) {
+            console.error("Error during registration:", error);
+            alert("An error occurred. Please try again later.");
           }
         });
       } else {
@@ -85,5 +90,4 @@
     });
   </script>
 </body>
-
 </html>
