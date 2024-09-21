@@ -13,7 +13,7 @@ from fastapi import (
 )
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from typing import List
+from typing import List, Optional
 import uvicorn
 import json
 import pandas as pd
@@ -28,6 +28,8 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
+import shutil
 
 # Database setup
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
@@ -52,20 +54,26 @@ class User(Base):
 class ChatHistory(Base):
     __tablename__ = "chat_histories"
     id = Column(Integer, primary_key=True, index=True)
-    chat_id = Column(String, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    messages = Column(Text)  # JSON serialized as text
+    chat_id = Column(String, index=True, unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    messages = Column(Text, nullable=False)  # JSON serialized as text
+    timestamp = Column(String, default=datetime.utcnow().isoformat())
     user = relationship("User", back_populates="chats")
+    files = relationship("FileModel", back_populates="chat")  # New relationship
 
 
 class FileModel(Base):
     __tablename__ = "files"
     id = Column(Integer, primary_key=True, index=True)
-    filename = Column(String)
-    filepath = Column(String)
-    upload_time = Column(String)  # Store the upload time as a string
-    user_id = Column(Integer, ForeignKey("users.id"))
+    filename = Column(String, nullable=False)
+    filepath = Column(String, nullable=False)  # Store the full file path
+    upload_time = Column(String, nullable=False)  # Store the upload time as a string
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    chat_id = Column(
+        String, ForeignKey("chat_histories.chat_id"), nullable=False
+    )  # New field
     user = relationship("User", back_populates="files")
+    chat = relationship("ChatHistory", back_populates="files")  # Establish relationship
 
 
 Base.metadata.create_all(bind=engine)
@@ -92,6 +100,12 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: str = None
+
+
+class ChatMetadata(BaseModel):
+    chat_id: str
+    timestamp: str
+    messages: int
 
 
 # OAuth2 setup
@@ -169,6 +183,7 @@ async def get_current_user(
 if not os.path.exists("uploads"):
     os.makedirs("uploads")
 
+
 # FastAPI app initialization
 app = FastAPI()
 
@@ -198,8 +213,9 @@ class ConnectionManager:
         print("Client connected")
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        print("Client disconnected")
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            print("Client disconnected")
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
@@ -207,6 +223,55 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+# Helper functions for chat and file management
+def get_chat_directory(user_id: int, chat_id: str) -> Path:
+    """
+    Returns the Path object for a user's specific chat directory.
+    """
+    return Path(f"uploads/{user_id}/{chat_id}")
+
+
+def save_chat_history_to_file(user_id: int, chat_id: str, messages: List[dict]):
+    """
+    Saves the chat messages to a JSON file in the specified format.
+    """
+    chat_dir = get_chat_directory(user_id, chat_id)
+    chat_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
+    chat_history_file = chat_dir / f"{user_id}-{chat_id}-chat_history.json"
+    with open(chat_history_file, "w") as f:
+        json.dump(messages, f, indent=4)
+    print(f"Chat history saved to {chat_history_file}")
+
+
+def load_chat_history_from_file(user_id: int, chat_id: str) -> List[dict]:
+    """
+    Loads the chat messages from the JSON file.
+    """
+    chat_history_file = (
+        get_chat_directory(user_id, chat_id) / f"{user_id}-{chat_id}-chat_history.json"
+    )
+    if not chat_history_file.exists():
+        return []
+    with open(chat_history_file, "r") as f:
+        messages = json.load(f)
+    return messages
+
+
+def save_uploaded_file(user_id: int, chat_id: str, file: UploadFile) -> str:
+    """
+    Saves the uploaded file to the appropriate chat directory and returns the file path.
+    """
+    chat_dir = get_chat_directory(user_id, chat_id)
+    files_dir = chat_dir / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)  # Ensure files directory exists
+    file_path = files_dir / file.filename
+    with open(file_path, "wb") as f:
+        content = file.file.read()
+        f.write(content)
+    print(f"File {file.filename} saved to {file_path}")
+    return str(file_path)
 
 
 # Routes
@@ -250,11 +315,33 @@ async def login_for_access_token(
     return Token(access_token=access_token, token_type="bearer")
 
 
+@app.get("/chats/", response_model=List[ChatMetadata])
+async def get_chats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint to retrieve all chat sessions for the current user.
+    Returns a list of chat metadata including chat_id, timestamp, and message count.
+    """
+    chats = db.query(ChatHistory).filter(ChatHistory.user_id == current_user.id).all()
+    chat_list = [
+        ChatMetadata(
+            chat_id=chat.chat_id,
+            timestamp=chat.timestamp,
+            messages=len(json.loads(chat.messages)),
+        )
+        for chat in chats
+    ]
+    return chat_list
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
     WebSocket endpoint for real-time communication.
     Authenticates the user using the JWT token passed as a query parameter.
+    Saves chat histories to JSON files.
     """
     token = websocket.query_params.get("token")
     if not token:
@@ -277,6 +364,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await manager.connect(websocket)
     chat_id = None
+    messages = []
+
     try:
         while True:
             data = await websocket.receive_text()
@@ -286,12 +375,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 chat_id = data.split("new_chat:")[1]
                 # Create a new ChatHistory in the database
                 db_chat = ChatHistory(
-                    chat_id=chat_id, user_id=user.id, messages=json.dumps([])
+                    chat_id=chat_id,
+                    user_id=user.id,
+                    messages=json.dumps([]),
+                    timestamp=datetime.utcnow().isoformat(),
                 )
                 db.add(db_chat)
                 db.commit()
                 db.refresh(db_chat)
                 print(f"Started new chat session with ID: {chat_id}")
+                # Initialize messages list
+                messages = []
+                # Save the empty chat history to JSON file
+                save_chat_history_to_file(user.id, chat_id, messages)
                 # Send confirmation to client
                 await websocket.send_text(f"Chat {chat_id} started.")
             else:
@@ -308,14 +404,28 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
                     if db_chat:
                         messages = json.loads(db_chat.messages)
-                        messages.append({"type": "sent", "content": data})
+                        # Append the sent message
+                        sent_message = {
+                            "type": "sent",
+                            "content": data,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                        messages.append(sent_message)
                         # Echo the message back or implement chatbot logic here
                         response = f"Echo: {data}"
                         await websocket.send_text(response)
-                        # Add the response to the messages
-                        messages.append({"type": "received", "content": response})
+                        # Append the received message
+                        received_message = {
+                            "type": "received",
+                            "content": response,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                        messages.append(received_message)
+                        # Update the database
                         db_chat.messages = json.dumps(messages)
                         db.commit()
+                        # Save the updated chat history to JSON file
+                        save_chat_history_to_file(user.id, chat_id, messages)
                     else:
                         error_msg = "Error: Chat session not found."
                         await websocket.send_text(error_msg)
@@ -337,39 +447,61 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.post("/upload/")
 async def upload_file(
     file: UploadFile = File(...),
+    chat_id: str = Form(...),  # Add chat_id as part of the form
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Endpoint to upload files. Accepts .xlsx, .csv, and .pdf files.
-    Stores the file and updates the database.
+    Saves the file under the specific chat directory and updates the database.
     """
     allowed_extensions = ["xlsx", "csv", "pdf"]
     filename = file.filename
     extension = filename.split(".")[-1].lower()
 
     if extension in allowed_extensions:
-        # Save the uploaded file to a directory
-        upload_dir = "uploads"
-        os.makedirs(upload_dir, exist_ok=True)
-        file_location = os.path.join(upload_dir, filename)
-        with open(file_location, "wb") as f:
-            content = await file.read()
-            f.write(content)
+        # Verify that the chat_id exists for the user
+        db_chat = (
+            db.query(ChatHistory)
+            .filter(
+                ChatHistory.chat_id == chat_id, ChatHistory.user_id == current_user.id
+            )
+            .first()
+        )
+        if not db_chat:
+            raise HTTPException(status_code=404, detail="Chat session not found.")
+
+        # Save the uploaded file to the chat's files directory
+        try:
+            file_path = save_uploaded_file(current_user.id, chat_id, file)
+        except Exception as e:
+            print(f"Error saving uploaded file: {e}")
+            raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
 
         # Create a new File record in the database
         db_file = FileModel(
             filename=filename,
-            filepath=file_location,
+            filepath=file_path,  # Store the full file path
             upload_time=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             user_id=current_user.id,
+            chat_id=chat_id,
         )
-        db.add(db_file)
-        db.commit()
-        db.refresh(db_file)
+        try:
+            db.add(db_file)
+            db.commit()
+            db.refresh(db_file)
+        except Exception as e:
+            print(f"Error saving file to database: {e}")
+            raise HTTPException(
+                status_code=500, detail="Failed to save file information."
+            )
 
-        # Retrieve the updated list of files
-        files = db.query(FileModel).filter(FileModel.user_id == current_user.id).all()
+        # Retrieve the updated list of files for this chat
+        files = (
+            db.query(FileModel)
+            .filter(FileModel.user_id == current_user.id, FileModel.chat_id == chat_id)
+            .all()
+        )
         file_list = [
             {"id": f.id, "filename": f.filename, "upload_time": f.upload_time}
             for f in files
@@ -381,13 +513,22 @@ async def upload_file(
 
 @app.get("/files/")
 async def get_uploaded_files(
-    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    chat_id: Optional[str] = None,  # Optional chat_id to filter files
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Endpoint to retrieve the list of files uploaded by the current user.
+    If chat_id is provided, filters files for that specific chat.
     """
-    files = db.query(FileModel).filter(FileModel.user_id == current_user.id).all()
-    file_list = [{"filename": f.filename, "upload_time": f.upload_time} for f in files]
+    query = db.query(FileModel).filter(FileModel.user_id == current_user.id)
+    if chat_id:
+        query = query.filter(FileModel.chat_id == chat_id)
+    files = query.all()
+    file_list = [
+        {"id": f.id, "filename": f.filename, "upload_time": f.upload_time}
+        for f in files
+    ]
     return {"fileList": file_list}
 
 
@@ -438,7 +579,7 @@ async def get_chat_history(
     db: Session = Depends(get_db),
 ):
     """
-    Endpoint to retrieve the chat history for a specific chat session.
+    Endpoint to retrieve the chat history and associated files for a specific chat session.
     """
     db_chat = (
         db.query(ChatHistory)
@@ -447,7 +588,22 @@ async def get_chat_history(
     )
     if db_chat:
         messages = json.loads(db_chat.messages)
-        return {"chat_id": chat_id, "messages": messages}
+        # Retrieve associated files
+        files = (
+            db.query(FileModel)
+            .filter(FileModel.user_id == current_user.id, FileModel.chat_id == chat_id)
+            .all()
+        )
+        file_list = [
+            {"id": f.id, "filename": f.filename, "upload_time": f.upload_time}
+            for f in files
+        ]
+        return {
+            "chat_id": chat_id,
+            "messages": messages,
+            "files": file_list,
+            "timestamp": db_chat.timestamp,
+        }
     else:
         raise HTTPException(status_code=404, detail="Chat not found")
 

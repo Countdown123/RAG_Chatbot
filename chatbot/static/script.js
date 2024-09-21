@@ -1,367 +1,659 @@
 // static/script.js
 
-// Check for the JWT token on page load
-document.addEventListener("DOMContentLoaded", function () {
-  var accessToken = localStorage.getItem("accessToken");
-  if (!accessToken) {
-    // Redirect to login page if not authenticated
-    window.location.href = "/login.html";
-  } else {
-    // Initialize WebSocket connection with the token
-    initializeWebSocket(accessToken);
-    // Fetch and display the list of uploaded files
-    fetchFileList();
-
-    // Attach logout functionality here
-    document.getElementById("logoutBtn").addEventListener("click", function () {
-      // Remove the token from local storage
-      localStorage.removeItem("accessToken");
-      // Redirect the user to the login page
-      window.location.href = "/login.html";
+// Utility function to generate UUID (for unique chat IDs)
+function generateUUID() { // Public Domain/MIT
+    var d = new Date().getTime();//Timestamp
+    var d2 = (performance && performance.now && (performance.now()*1000)) || 0;//Time in microseconds since page-load or 0 if unsupported
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16;//random number between 0 and 16
+        if(d > 0){
+            r = (d + r)%16 | 0;
+            d = Math.floor(d/16);
+        } else {
+            r = (d2 + r)%16 | 0;
+            d2 = Math.floor(d2/16);
+        }
+        return (c==='x' ? r : (r&0x3|0x8)).toString(16);
     });
-  }
+}
+
+// Initialize the application
+document.addEventListener("DOMContentLoaded", function () {
+    const accessToken = localStorage.getItem("accessToken");
+
+    // Check if the token is available
+    if (!accessToken) {
+        redirectToLogin();
+    } else {
+        initializeWebSocket(accessToken);  // Pass the token when initializing the WebSocket
+        fetchChatList();                   // Fetch and display chat list
+        setupLogoutButton();
+        setupSendMessageForm();            // Set up the message form submit handler
+        setupUploadForm();                 // Set up the file upload form submit handler
+        setupNewChatButton();              // Set up the new chat button
+    }
 });
 
-// Initialize WebSocket connection with token
+// Redirect to login page
+function redirectToLogin() {
+    window.location.href = "/login.html";
+}
+
+// Handle logout
+function setupLogoutButton() {
+    const logoutBtn = document.getElementById("logoutBtn");
+    if (logoutBtn) {
+        logoutBtn.addEventListener("click", function () {
+            saveChatHistory();  // Save chat history when the user logs out
+            localStorage.removeItem("accessToken");
+            redirectToLogin();
+        });
+    }
+}
+
+// Initialize WebSocket connection with the token
 function initializeWebSocket(token) {
-  var ws = new WebSocket("ws://127.0.0.1:3939/ws?token=" + token);
+    const ws = new WebSocket(`ws://127.0.0.1:3939/ws?token=${token}`);
+    window.ws = ws;
 
-  // Store the WebSocket instance for use in other functions
-  window.ws = ws;
+    ws.onopen = () => {
+        console.log("Connected to the WebSocket server");
+        // Optionally, you can start a default chat or wait for user action
+        // For now, we'll wait for user to start a chat
+    };
 
-  ws.onopen = function () {
-    console.log("Connected to the WebSocket server");
-    initializeChat();  // Start a new chat on connection
-  };
+    ws.onmessage = (event) => {
+        const data = event.data;
+        if (data.startsWith("Chat ") && data.endsWith(" started.")) {
+            // Extract chat_id from the message
+            const chat_id = data.split("Chat ")[1].split(" started.")[0];
+            currentChatId = chat_id;
+            chatHistories[currentChatId] = [];  // Initialize chat history
+            // Create a new chat history entry in the UI
+            createNewChatHistoryEntry(currentChatId, new Date().toLocaleString());
+        } else {
+            receiveMessage(data);
+        }
+    };
 
-  ws.onmessage = function (event) {
-    receiveMessage(event.data);  // Handle incoming messages
-  };
+    ws.onclose = (event) => {
+        console.log("WebSocket closed:", event);
+        if (currentChatId && chatHistories[currentChatId]) {
+            saveChatHistory(currentChatId);  // Save chat history on WebSocket disconnection
+        }
+    };
 
-  ws.onclose = function (event) {
-    console.log("WebSocket closed:", event);
-    // Optionally, handle reconnection or inform the user
-  };
-
-  ws.onerror = function (error) {
-    console.error("WebSocket error:", error);
-    alert("WebSocket connection failed. Please try again later.");
-  };
+    ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        alert("WebSocket connection failed. Please try again later.");
+    };
 }
 
 var currentChatId = null;  // Track the current chat session
 let chatHistories = {};    // Store chat histories for different sessions
 
-// Initialize the chat after WebSocket is connected
-function initializeChat() {
-  if (!currentChatId) {
-    startNewChat();  // Start a new chat when the WebSocket is open
-  }
+// Fetch the list of chat sessions for the user
+function fetchChatList() {
+    const token = localStorage.getItem("accessToken");
+    fetch("/chats/", {
+        method: "GET",
+        headers: {
+            "Authorization": `Bearer ${token}`
+        }
+    })
+        .then(response => {
+            if (response.status === 401) {
+                alert("Session expired. Please log in again.");
+                localStorage.removeItem("accessToken");
+                redirectToLogin();
+                throw new Error("Unauthorized");
+            }
+            if (!response.ok) {
+                throw new Error("Failed to fetch chat list.");
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data) {
+                updateChatListDisplay(data);
+            }
+        })
+        .catch(error => {
+            console.error("Error fetching chat list:", error);
+            alert("Error fetching chat list. Please try again.");
+        });
 }
 
-// Handle received messages from the WebSocket server
+// Update the chat list display
+function updateChatListDisplay(chatList) {
+    const chatHistoryList = document.getElementById("chatHistory");
+    if (!chatHistoryList) return;
+
+    chatHistoryList.innerHTML = "";  // Clear existing list
+
+    if (chatList.length === 0) {
+        const noChatsItem = document.createElement("li");
+        noChatsItem.textContent = "No previous chats found.";
+        chatHistoryList.appendChild(noChatsItem);
+        return;
+    }
+
+    chatList.forEach(chat => {
+        const listItem = document.createElement("li");
+        listItem.classList.add("history-item");
+        listItem.id = `chat-${chat.chat_id}`;
+        listItem.textContent = `Chat from ${chat.timestamp} (${chat.messages} messages)`;
+        listItem.onclick = () => loadChatContent(chat.chat_id);
+        chatHistoryList.appendChild(listItem);
+    });
+}
+
+// Load a specific chat's content into the chat window (including files)
+function loadChatContent(chatId) {
+    currentChatId = chatId;
+
+    // Fetch chat history and associated files from the backend
+    fetch(`/history/${chatId}`, {
+        method: "GET",
+        headers: {
+            "Authorization": `Bearer ${localStorage.getItem("accessToken")}`
+        }
+    })
+        .then(response => {
+            if (response.status === 401) {
+                alert("Session expired. Please log in again.");
+                localStorage.removeItem("accessToken");
+                redirectToLogin();
+                throw new Error("Unauthorized");
+            }
+            if (!response.ok) {
+                throw new Error(`Chat history for chat ID ${chatId} not found`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.messages) {
+                displayChatMessages(data.messages);  // Load and display chat messages
+                if (data.files) {
+                    displayChatFiles(data.files);      // Load and display associated files
+                }
+                chatHistories[currentChatId] = data.messages; // Update local chat history
+                const messageCount = data.messages.length;
+                const timestamp = new Date(data.timestamp).toLocaleString();
+                updateChatHistoryEntry(chatId, timestamp, messageCount);
+            }
+        })
+        .catch(error => {
+            console.error("Error loading chat history:", error);
+            alert("Error loading chat history. Please try again.");
+        });
+}
+
+// Handle received messages and display them
 function receiveMessage(message) {
-  console.log("Received message:", message);
-  if (!currentChatId) {
-    startNewChat();  // Start a new chat if none is active
-  }
-  addMessageToDisplay(message, "received");  // Display the message as 'received'
-}
-
-// Send message via WebSocket
-function sendMessage(event) {
-  event.preventDefault();
-  var input = document.getElementById("messageText");
-  var message = input.value.trim();  // Get the typed message
-  
-  if (message) {
     if (!currentChatId) {
-      startNewChat();  // Ensure a new chat is started if none exists
+        alert("Received a message without an active chat session.");
+        return;
     }
-    window.ws.send(message);  // Send the message to the server
-    addMessageToDisplay(message, "sent");  // Display the message as 'sent'
-    input.value = "";  // Clear the input field
-  }
-  var messages = document.getElementById("messages");
-  messages.scrollTop = messages.scrollHeight;  // Scroll to the bottom of the chat
+    addMessageToDisplay(message, "received");  // Display the received message
 }
 
-// Append a message to the chat window and save it in chat history
+// Append a message to the chat window and save in chat history
 function addMessageToDisplay(text, type) {
-  var messages = document.getElementById("messages");
-  var messageElement = document.createElement("li");
-  messageElement.classList.add(type);  // Add either 'sent' or 'received' class
-  messageElement.textContent = text;
-  messages.appendChild(messageElement);
-  messages.scrollTop = messages.scrollHeight;  // Scroll to the latest message
+    const messagesContainer = document.getElementById("messages");
+    if (!messagesContainer) return;
 
-  // Save the message in the current chat history
-  if (currentChatId) {
-    if (!chatHistories[currentChatId]) {
-      chatHistories[currentChatId] = [];
+    const messageElement = document.createElement("li");
+    messageElement.classList.add(type);  // 'sent' or 'received'
+    messageElement.textContent = text;
+    messagesContainer.appendChild(messageElement);
+    scrollToBottom(messagesContainer);  // Ensure the chat window scrolls to the latest message
+
+    // Save the message in the current chat history
+    if (currentChatId) {
+        if (!chatHistories[currentChatId]) {
+            chatHistories[currentChatId] = [];
+        }
+        chatHistories[currentChatId].push({ type, content: text, timestamp: new Date().toISOString() });
+        updateChatHistoryEntry(currentChatId, new Date().toLocaleString(), chatHistories[currentChatId].length);
     }
-    chatHistories[currentChatId].push({type: type, content: text});
-  }
+}
 
-  updateChatHistoryEntry();  // Update the chat history list
+// Scroll the chat window to the bottom to show the latest message
+function scrollToBottom(container) {
+    container.scrollTop = container.scrollHeight;
 }
 
 // Create a new entry in the chat history list
-function createNewChatHistoryEntry() {
-  var chatHistory = document.getElementById("chatHistory");
-  var historyItem = document.createElement("li");
-  historyItem.classList.add("history-item");
-  historyItem.id = `chat-${currentChatId}`;
+function createNewChatHistoryEntry(chatId, timestamp) {
+    const chatHistoryList = document.getElementById("chatHistory");
+    if (!chatHistoryList) return;
 
-  var thisChatId = currentChatId;  // Capture the chatId for this history item
-
-  var timestamp = new Date().toLocaleString();
-  historyItem.textContent = `Chat from ${timestamp}`;
-  
-  // When a chat history item is clicked, display that chat's content
-  historyItem.onclick = function() {
-    loadChatContent(thisChatId);
-  };
-
-  // Insert the new chat history at the top of the history list
-  chatHistory.insertBefore(historyItem, chatHistory.firstChild);
+    // Create a new history item
+    const historyItem = document.createElement("li");
+    historyItem.classList.add("history-item");
+    historyItem.id = `chat-${chatId}`;
+    historyItem.textContent = `Chat from ${timestamp} (0 messages)`;
+    historyItem.onclick = () => loadChatContent(chatId);
+    chatHistoryList.insertBefore(historyItem, chatHistoryList.firstChild);
 }
 
-// Update the display of an existing chat history entry
-function updateChatHistoryEntry() {
-  var historyItem = document.getElementById(`chat-${currentChatId}`);
-  if (historyItem && chatHistories[currentChatId]) {
-    historyItem.textContent = `Chat from ${new Date().toLocaleString()} (${chatHistories[currentChatId].length} messages)`;
-  }
+// Update an existing chat history entry with the number of messages
+function updateChatHistoryEntry(chatId, timestamp, messageCount) {
+    const historyItem = document.getElementById(`chat-${chatId}`);
+    if (historyItem) {
+        historyItem.textContent = `Chat from ${timestamp} (${messageCount} messages)`;
+    }
 }
 
-// Load a specific chat's content into the chat window (clear current chat and load selected)
-function loadChatContent(chatId) {
-  var messages = document.getElementById("messages");
-  messages.innerHTML = '';  // Clear the current chat display
-
-  // Display the messages of the selected chat
-  if (chatHistories[chatId]) {
-    chatHistories[chatId].forEach(msg => {
-      var messageElement = document.createElement("li");
-      messageElement.classList.add(msg.type);  // Add either 'sent' or 'received' class
-      messageElement.textContent = msg.content;
-      messages.appendChild(messageElement);
-    });
-  }
-
-  // Set the current chat ID to the selected chat
-  currentChatId = chatId;
-}
-
-// Start a new chat session and clear the chat window
+// Start a new chat session
 function startNewChat() {
-  document.getElementById("messages").innerHTML = '';  // Clear current chat display
-  currentChatId = Date.now();  // Use the current timestamp as the new chat ID
-  chatHistories[currentChatId] = [];  // Initialize a new history entry
-  createNewChatHistoryEntry();  // Add the new chat to the history list
-  document.getElementById("messageText").value = '';  // Clear the input field
-  window.ws.send("new_chat:" + currentChatId);  // Notify the server of the new chat
-  addMessageToDisplay("New chat started. How can I help you?", "received");  // Display a welcome message
+    if (!window.ws || window.ws.readyState !== WebSocket.OPEN) {
+        alert("WebSocket is not connected. Please try again later.");
+        return;
+    }
+
+    const newChatId = generateUUID();  // Generate a unique chat ID
+    currentChatId = newChatId;
+    chatHistories[currentChatId] = [];  // Initialize the new chat history
+
+    // Clear the current chat display and input field
+    document.getElementById("messages").innerHTML = "";
+    document.getElementById("messageText").value = "";
+
+    // Notify the server about the new chat session
+    window.ws.send(`new_chat:${currentChatId}`);
+
+    // Display a welcome message for the new chat
+    addMessageToDisplay("New chat started. How can I help you?", "received");
+
+    // Add the new chat to the history list
+    const timestamp = new Date().toLocaleString();
+    createNewChatHistoryEntry(currentChatId, timestamp);
+
+    // Refresh the chat list
+    fetchChatList();
 }
 
-// Handle file upload and display the Excel data in a popup
+// Save chat history to the backend
+function saveChatHistory(chatId) {
+    if (!chatId || !chatHistories[chatId]) return;
+
+    // Optionally, implement logic to save chat history if not already handled by WebSocket
+    // Currently, chat history is saved via WebSocket on message reception and chat initiation
+    console.log(`Chat history for ${chatId} saved.`);
+}
+
+// Set up the message form submit functionality
+function setupSendMessageForm() {
+    const messageForm = document.getElementById("messageForm");
+    if (messageForm) {
+        messageForm.addEventListener("submit", function (event) {
+            event.preventDefault();  // Prevent the form from submitting normally
+            sendMessage(event);
+        });
+    }
+}
+
+// Send a message via WebSocket
+function sendMessage(event) {
+    event.preventDefault();
+    const messageInput = document.getElementById("messageText");
+    if (!messageInput) return;
+
+    const messageText = messageInput.value.trim();
+
+    if (messageText === "") return;  // Do nothing if message is empty
+
+    if (!currentChatId) {
+        alert("No active chat session. Please start a new chat.");
+        return;
+    }
+
+    // Send the message to the WebSocket server
+    window.ws.send(messageText);
+
+    // Display the sent message in the chat window
+    addMessageToDisplay(messageText, "sent");
+
+    // Clear the input field
+    messageInput.value = "";
+}
+
+// Set up the file upload form submit functionality
+function setupUploadForm() {
+    const uploadForm = document.getElementById("uploadForm");
+    if (uploadForm) {
+        uploadForm.addEventListener("submit", function (event) {
+            event.preventDefault();  // Prevent the form from submitting normally
+            uploadFile();
+        });
+    }
+}
+
+// Handle file upload and associate it with the current chat
 function uploadFile() {
-  var accessToken = localStorage.getItem("accessToken");
-  var formData = new FormData(document.getElementById("uploadForm"));
-  fetch("/upload/", {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer " + accessToken,
-    },
-    body: formData,
-  })
-    .then((response) => {
-      if (response.status === 401) {
-        // Token might have expired
+    const accessToken = localStorage.getItem("accessToken");
+    const uploadForm = document.getElementById("uploadForm");
+    if (!uploadForm) return;
+
+    const formData = new FormData(uploadForm);
+
+    // Include the current chat ID in the upload request
+    if (!currentChatId) {
+        alert("Please start a chat before uploading files.");
+        return;
+    }
+    formData.append("chat_id", currentChatId);
+
+    fetch("/upload/", {
+        method: "POST",
+        headers: { 
+            "Authorization": `Bearer ${accessToken}`
+            // Note: Do not set 'Content-Type' header when sending FormData
+        },
+        body: formData,
+    })
+        .then(response => handleFileUploadResponse(response))
+        .catch(error => console.error("File upload error:", error));
+}
+
+// Handle the file upload response
+function handleFileUploadResponse(response) {
+    if (response.status === 401) {
         alert("Session expired. Please log in again.");
         localStorage.removeItem("accessToken");
-        window.location.href = "/login.html";
-      }
-      return response.json();
-    })
-    .then((data) => {
-      console.log("Upload response data:", data); // Debugging
-      if (data.tableData) {
-        showTablePopup(data.tableData);  // Show the uploaded table in a popup
-        // Update the file list
+        redirectToLogin();
+    }
+    return response.json().then((data) => {
+        console.log("Upload response data:", data); // Debugging
         if (data.fileList) {
-          updateFileListDisplay(data.fileList);
+            updateFileListDisplay(data.fileList);
+            // Optionally, display a success message
+            alert("File uploaded successfully!");
+            // Clear the upload form
+            document.getElementById("uploadForm").reset();
+        } else if (data.detail) {
+            console.error("Error:", data.detail);
+            alert("Error: " + data.detail);
+        } else {
+            console.error("Unexpected response:", data);
+            alert("An unexpected error occurred during file upload.");
         }
-      } else if (data.detail) {
-        console.error("Error:", data.detail);
-        alert("Error: " + data.detail);
-      } else {
-        console.error("Unexpected response:", data);
-        alert("An unexpected error occurred during file upload.");
-      }
-    })
-    .catch((error) => {
-      console.error("Error:", error);
     });
 }
 
-// Show the table data (from the Excel file) in a popup modal
-function showTablePopup(tableData) {
-  const popup = document.createElement("div");
-  popup.classList.add("modal");
 
-  const popupContent = document.createElement("div");
-  popupContent.classList.add("modal-content");
-  popupContent.innerHTML = tableData;
-
-  const closeButton = document.createElement("button");
-  closeButton.textContent = "Close";
-  closeButton.onclick = function() {
-    document.body.removeChild(popup);
-  };
-
-  popup.appendChild(popupContent);
-  popup.appendChild(closeButton);
-  document.body.appendChild(popup);
-}
-
-function fetchFileList() {
-  var accessToken = localStorage.getItem("accessToken");
-  fetch("/files/", {
-    method: "GET",
-    headers: {
-      "Authorization": "Bearer " + accessToken,
-    },
-  })
-    .then((response) => {
-      if (response.status === 401) {
-        // Token might have expired
-        alert("Session expired. Please log in again.");
-        localStorage.removeItem("accessToken");
-        window.location.href = "/login.html";
-      }
-      return response.json();
+// Fetch the list of uploaded files for the current chat
+function fetchFileList(chatId = null) {
+    var accessToken = localStorage.getItem("accessToken");
+    let url = "/files/";
+    if (chatId) {
+        url += `?chat_id=${chatId}`;
+    }
+    fetch(url, {
+        method: "GET",
+        headers: {
+            "Authorization": `Bearer ${accessToken}`
+        },
     })
-    .then((data) => {
-      if (data.fileList) {
-        updateFileListDisplay(data.fileList);
-      } else if (data.detail) {
-        console.error("Error:", data.detail);
-        alert("Error: " + data.detail);
-      } else {
-        console.error("Unexpected response:", data);
-        alert("An unexpected error occurred while fetching file list.");
-      }
-    })
-    .catch((error) => {
-      console.error("Error:", error);
-    });
+        .then((response) => {
+            if (response.status === 401) {
+                // Token might have expired
+                alert("Session expired. Please log in again.");
+                localStorage.removeItem("accessToken");
+                redirectToLogin();
+            }
+            return response.json();
+        })
+        .then((data) => {
+            if (data.fileList) {
+                updateFileListDisplay(data.fileList);
+            } else if (data.detail) {
+                console.error("Error:", data.detail);
+                alert("Error: " + data.detail);
+            } else {
+                console.error("Unexpected response:", data);
+                alert("An unexpected error occurred while fetching file list.");
+            }
+        })
+        .catch((error) => {
+            console.error("Error:", error);
+        });
 }
 
 // Update the file list display
 function updateFileListDisplay(fileList) {
-  var fileListContainer = document.getElementById("fileList");
-  fileListContainer.innerHTML = ''; // Clear the current list
+    const fileListContainer = document.getElementById("fileList");
+    if (!fileListContainer) return;
 
-  fileList.forEach((file) => {
-    var listItem = document.createElement("li");
+    fileListContainer.innerHTML = "";  // Clear the file list display
+
+    if (fileList.length === 0) {
+        const noFilesItem = document.createElement("li");
+        noFilesItem.textContent = "No files uploaded for this chat.";
+        fileListContainer.appendChild(noFilesItem);
+        return;
+    }
+
+    fileList.forEach(file => {
+        const listItem = createFileListItem(file);
+        fileListContainer.appendChild(listItem);
+    });
+
+    // Ensure the file list container is visible
+    document.getElementById("fileListContainer").style.display = "block";  
+}
+
+// Create a list item for each file
+function createFileListItem(file) {
+    const listItem = document.createElement("li");
     listItem.textContent = `${file.filename} (Uploaded on ${file.upload_time})`;
-    listItem.setAttribute('data-file-id', file.id);
     listItem.style.cursor = 'pointer';
+    listItem.onclick = () => fetchFileData(file.id, file.filename);
 
-    // Add click event listener to the list item
-    listItem.addEventListener('click', function () {
-      fetchFileData(file.id, file.filename);
-    });
-
-    fileListContainer.appendChild(listItem);
-  });
+    return listItem;
 }
 
-// Fetch the file data when a file is clicked
+// Fetch file data when a file is clicked
 function fetchFileData(fileId, filename) {
-  var accessToken = localStorage.getItem("accessToken");
-  fetch(`/file/${fileId}`, {
-    method: "GET",
-    headers: {
-      "Authorization": "Bearer " + accessToken,
-    },
-  })
-    .then((response) => response.json())
-    .then((data) => {
-      if (data.columns && data.data) {
-        displayTable(data.columns, data.data, filename);
-      } else if (data.message) {
-        alert(data.message);
-      } else {
-        alert("An error occurred while retrieving the file data.");
-      }
+    const accessToken = localStorage.getItem("accessToken");
+    fetch(`/file/${fileId}`, {
+        method: "GET",
+        headers: {
+            "Authorization": `Bearer ${accessToken}`,
+        },
     })
-    .catch((error) => {
-      console.error("Error fetching file data:", error);
+        .then(response => {
+            if (response.status === 401) {
+                alert("Session expired. Please log in again.");
+                localStorage.removeItem("accessToken");
+                redirectToLogin();
+                throw new Error("Unauthorized");
+            }
+            if (!response.ok) {
+                throw new Error("Failed to fetch file data.");
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.columns && data.data) {
+                displayTable(data.columns, data.data, filename);
+            } else if (data.message) {
+                alert(data.message);
+            } else {
+                alert("An error occurred while retrieving the file data.");
+            }
+        })
+        .catch(error => {
+            console.error("Error fetching file data:", error);
+            alert("Error fetching file data. Please try again.");
+        });
+}
+
+// Display data in a modal table
+function displayTable(columns, data, filename) {
+    const modal = createModal();
+    const modalContent = createModalContent(filename);
+
+    const table = createTable(columns, data);
+
+    modalContent.appendChild(table);
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+
+    // Initialize DataTables on the newly created table
+    $(table).DataTable({
+        responsive: true,
+        paging: true,
+        searching: true,
+        ordering: true,
+        // Add any additional DataTables configurations here
     });
 }
 
-// Display the data in a dynamic table
-function displayTable(columns, data, filename) {
-  // Create a modal popup to display the table
-  const modal = document.createElement('div');
-  modal.classList.add('modal');
+// Create the modal structure
+function createModal() {
+    const existingModal = document.getElementById("tableModal");
+    if (existingModal) {
+        existingModal.style.display = "none"; // Hide existing modal if any
+        existingModal.remove(); // Remove it to create a fresh one
+    }
 
-  // Modal content container
-  const modalContent = document.createElement('div');
-  modalContent.classList.add('modal-content');
+    const modal = document.createElement("div");
+    modal.classList.add("modal");
+    modal.id = "tableModal"; // Assign ID for consistency
+    modal.style.display = "block"; // Show the modal
+    return modal;
+}
 
-  // Close button
-  const closeButton = document.createElement('span');
-  closeButton.classList.add('close-button');
-  closeButton.innerHTML = '&times;';
-  closeButton.onclick = function() {
-    document.body.removeChild(modal);
-  };
+// Create the modal content
+function createModalContent(filename) {
+    const modalContent = document.createElement("div");
+    modalContent.classList.add("modal-content");
 
-  // Table title
-  const title = document.createElement('h2');
-  title.textContent = filename;
+    const closeButton = createCloseButton(modalContent);
+    const title = document.createElement("h2");
+    title.textContent = filename;
 
-  // Create the table
-  const table = document.createElement('table');
-  table.classList.add('data-table');
+    modalContent.appendChild(closeButton);
+    modalContent.appendChild(title);
 
-  // Create table header
-  const thead = document.createElement('thead');
-  const headerRow = document.createElement('tr');
-  columns.forEach(col => {
-    const th = document.createElement('th');
-    th.textContent = col;
-    headerRow.appendChild(th);
-  });
-  thead.appendChild(headerRow);
+    return modalContent;
+}
 
-  // Create table body
-  const tbody = document.createElement('tbody');
-  data.forEach(row => {
-    const tr = document.createElement('tr');
+// Create the modal close button
+function createCloseButton(modalContent) {
+    const closeButton = document.createElement("span");
+    closeButton.classList.add("close-button");
+    closeButton.innerHTML = "&times;";
+    closeButton.onclick = () => {
+        modalContent.parentElement.style.display = "none";
+        modalContent.parentElement.remove();
+    };
+    return closeButton;
+}
+
+// Create a table with columns and data
+function createTable(columns, data) {
+    const table = document.createElement("table");
+    table.classList.add("display", "responsive", "nowrap", "data-table");
+    table.style.width = "100%";
+    table.id = "dataTable"; // Assign ID for DataTables
+
+    const thead = createTableHeader(columns);
+    const tbody = createTableBody(columns, data);
+
+    table.appendChild(thead);
+    table.appendChild(tbody);
+
+    return table;
+}
+
+// Create the table header
+function createTableHeader(columns) {
+    const thead = document.createElement("thead");
+    const headerRow = document.createElement("tr");
+
     columns.forEach(col => {
-      const td = document.createElement('td');
-      td.textContent = row[col];
-      tr.appendChild(td);
+        const th = document.createElement("th");
+        th.textContent = col;
+        headerRow.appendChild(th);
     });
-    tbody.appendChild(tr);
-  });
 
-  table.appendChild(thead);
-  table.appendChild(tbody);
+    thead.appendChild(headerRow);
+    return thead;
+}
 
-  // Assemble modal content
-  modalContent.appendChild(closeButton);
-  modalContent.appendChild(title);
-  modalContent.appendChild(table);
+// Create the table body
+function createTableBody(columns, data) {
+    const tbody = document.createElement("tbody");
 
-  // Add content to modal
-  modal.appendChild(modalContent);
+    data.forEach(row => {
+        const tr = document.createElement("tr");
+        columns.forEach(col => {
+            const td = document.createElement("td");
+            td.textContent = row[col];
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
 
-  // Append modal to body
-  document.body.appendChild(modal);
+    return tbody;
+}
+
+// Generic error handler
+function showErrorAlert(error) {
+    console.error("Error:", error);
+    alert("An unexpected error occurred.");
+}
+
+// Set up the new chat button
+function setupNewChatButton() {
+    const newChatBtn = document.getElementById("newChatBtn");
+    if (newChatBtn) {
+        newChatBtn.addEventListener("click", function () {
+            startNewChat();
+        });
+    }
+}
+
+// Display chat messages
+function displayChatMessages(messages) {
+    const messagesContainer = document.getElementById("messages");
+    if (!messagesContainer) return;
+
+    messagesContainer.innerHTML = "";  // Clear the chat display
+
+    messages.forEach(msg => {
+        const messageElement = document.createElement("li");
+        messageElement.classList.add(msg.type);  // 'sent' or 'received'
+        messageElement.textContent = msg.content;
+        messagesContainer.appendChild(messageElement);
+    });
+
+    scrollToBottom(messagesContainer);
+}
+
+// Display associated files with chat history
+function displayChatFiles(files) {
+    const fileListContainer = document.getElementById("fileList");
+    if (!fileListContainer) return;
+
+    fileListContainer.innerHTML = "";  // Clear the file list display
+
+    if (files.length === 0) {
+        const noFilesItem = document.createElement("li");
+        noFilesItem.textContent = "No files associated with this chat.";
+        fileListContainer.appendChild(noFilesItem);
+        return;
+    }
+
+    files.forEach(file => {
+        const listItem = createFileListItem(file);
+        fileListContainer.appendChild(listItem);
+    });
+
+    // Ensure the file list container is visible
+    document.getElementById("fileListContainer").style.display = "block";  
 }

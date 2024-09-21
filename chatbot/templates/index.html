@@ -3,19 +3,212 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chatbot</title>
+  
+  <!-- DataTables CSS -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.5/css/jquery.dataTables.min.css">
+  <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.4.1/css/responsive.dataTables.min.css">
+  
+  <!-- Your Custom CSS -->
   <link rel="stylesheet" href="/static/style.css" />
+  
+  <!-- jQuery (required for DataTables) -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  
+  <!-- DataTables JS -->
+  <script src="https://cdn.datatables.net/1.13.5/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/responsive/2.4.1/js/dataTables.responsive.min.js"></script>
+  
+  <!-- Your Custom JS -->
+  <script src="/static/script.js" defer></script>
+  
+  <title>Chatbot</title>
+  
+  <!-- Modal Styling (if you decide to use a modal) -->
+  <style>
+    /* Modal styling */
+    .modal {
+        display: none; /* Hidden by default */
+        position: fixed; /* Stay in place */
+        z-index: 1000; /* Sit on top */
+        left: 0;
+        top: 0;
+        width: 100%; /* Full width */
+        height: 100%; /* Full height */
+        overflow: auto; /* Enable scroll if needed */
+        background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+    }
+
+    .modal-content {
+        background-color: #fefefe;
+        margin: 5% auto; /* 5% from the top and centered */
+        padding: 20px;
+        border: 1px solid #888;
+        width: 90%; /* Could be more or less, depending on screen size */
+        max-width: 1200px;
+    }
+
+    .close-button {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+    }
+
+    .close-button:hover,
+    .close-button:focus {
+        color: black;
+        text-decoration: none;
+    }
+
+    /* Optional: Style the table headers */
+    table.dataTable thead th {
+        background-color: #f2f2f2;
+    }
+
+    /* Additional styling for chat and layout */
+    .main-container {
+        display: flex;
+        height: 100vh;
+        background-color: #f0f0f0;
+    }
+
+    .chat-container {
+        flex: 2;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid #ccc;
+        padding: 10px;
+    }
+
+    .messages {
+        flex: 1;
+        list-style-type: none;
+        padding: 0;
+        overflow-y: auto;
+        margin-bottom: 10px;
+    }
+
+    .messages li {
+        padding: 8px 12px;
+        margin-bottom: 5px;
+        border-radius: 15px;
+        max-width: 70%;
+        word-wrap: break-word;
+    }
+
+    .messages li.sent {
+        background-color: #dcf8c6;
+        align-self: flex-end;
+    }
+
+    .messages li.received {
+        background-color: #fff;
+        align-self: flex-start;
+    }
+
+    form {
+        display: flex;
+    }
+
+    form input[type="text"] {
+        flex: 1;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 20px 0 0 20px;
+        outline: none;
+    }
+
+    form button {
+        padding: 10px 20px;
+        border: none;
+        background-color: #4CAF50;
+        color: white;
+        border-radius: 0 20px 20px 0;
+        cursor: pointer;
+    }
+
+    form button:hover {
+        background-color: #45a049;
+    }
+
+    .right-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 10px;
+    }
+
+    .upload-container, .history-container {
+        background-color: #fff;
+        padding: 15px;
+        border-radius: 15px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+
+    .upload-container h2, .history-container h2 {
+        margin-top: 0;
+    }
+
+    .history-list {
+        list-style-type: none;
+        padding: 0;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .history-list li {
+        padding: 8px 12px;
+        margin-bottom: 5px;
+        border-radius: 10px;
+        background-color: #e6e6e6;
+        cursor: pointer;
+    }
+
+    .history-list li:hover {
+        background-color: #d4d4d4;
+    }
+
+    .new-chat-container {
+        text-align: center;
+        margin-top: 10px;
+    }
+
+    .new-chat-container button {
+        padding: 10px 20px;
+        border: none;
+        background-color: #008CBA;
+        color: white;
+        border-radius: 20px;
+        cursor: pointer;
+    }
+
+    .new-chat-container button:hover {
+        background-color: #007bb5;
+    }
+
+    /* Styling for file list */
+    #fileListContainer h3 {
+        margin-top: 10px;
+    }
+
+    #fileList li {
+        padding: 5px 0;
+    }
+  </style>
 </head>
 <body>
   <div class="main-container">
     <div class="chat-container">
-      <ul id="messages"></ul>
-      <form id="messageForm" onsubmit="sendMessage(event)">
+      <ul id="messages" class="messages"></ul>
+      <form id="messageForm">
         <input
           type="text"
           id="messageText"
           autocomplete="off"
           placeholder="Type your message..."
+          required
         />
         <button type="submit">Send</button>
       </form>
@@ -24,11 +217,11 @@
       <div class="upload-container">
         <h2>Upload File</h2>
         <form id="uploadForm" enctype="multipart/form-data">
-        <input type="file" name="file" id="fileInput" accept=".xlsx, .csv, .pdf" required />
-        <button type="button" onclick="uploadFile()">Upload</button>
+          <input type="file" name="file" id="fileInput" accept=".xlsx, .csv, .pdf" required />
+          <button type="submit">Upload</button>
         </form>
-        <!-- New container for the file list -->
-        <div id="fileListContainer">
+        <!-- Container for the file list -->
+        <div id="fileListContainer" style="display: none;">
           <h3>Your Uploaded Files:</h3>
           <ul id="fileList">
             <!-- File list items will be added here dynamically -->
@@ -41,12 +234,30 @@
           <!-- Chat history items will be added here dynamically -->
         </ul>
         <div class="new-chat-container">
-          <button id="newChatBtn" onclick="startNewChat()">New Chat</button>
+          <button id="newChatBtn">New Chat</button>
         </div>
       </div>
     </div>
   </div>
+
+  <!-- Logout Button -->
   <button id="logoutBtn" style="position: fixed; bottom: 20px; right: 20px; padding: 10px; background-color: #ff4d4d; color: white; border: none; cursor: pointer;">Logout</button>
-  <script src="/static/script.js?v=1.0"></script>
+
+  <!-- Modal Structure for Displaying Tables -->
+  <div id="tableModal" class="modal">
+      <div class="modal-content">
+          <span class="close-button">&times;</span>
+          <h2 id="modalTitle">File Data</h2>
+          <table id="dataTable" class="display responsive nowrap" style="width:100%">
+              <thead>
+                  <!-- Dynamically populated headers -->
+              </thead>
+              <tbody>
+                  <!-- Dynamically populated data -->
+              </tbody>
+          </table>
+      </div>
+  </div>
+
 </body>
 </html>
