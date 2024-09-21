@@ -1,0 +1,11 @@
+# Serve table.html
+@app.get("/table.html", response_class=HTMLResponse)
+async def read_table_html():
+    try:
+        with open(os.path.join("templates", "table.html")) as f:
+            content = f.read()
+        logger.info("Served table.html")
+        return content
+    except Exception as e:
+        logger.error(f"Error serving table.html: {e}")
+        raise HTTPException(status_code=500, detail="Error loading table page")
