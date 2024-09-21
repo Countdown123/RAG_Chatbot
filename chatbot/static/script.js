@@ -11,6 +11,14 @@ document.addEventListener("DOMContentLoaded", function () {
     initializeWebSocket(accessToken);
     // Fetch and display the list of uploaded files
     fetchFileList();
+
+    // Attach logout functionality here
+    document.getElementById("logoutBtn").addEventListener("click", function () {
+      // Remove the token from local storage
+      localStorage.removeItem("accessToken");
+      // Redirect the user to the login page
+      window.location.href = "/login.html";
+    });
   }
 });
 
@@ -218,7 +226,6 @@ function showTablePopup(tableData) {
   document.body.appendChild(popup);
 }
 
-// Fetch and display the list of uploaded files
 function fetchFileList() {
   var accessToken = localStorage.getItem("accessToken");
   fetch("/files/", {
@@ -237,7 +244,6 @@ function fetchFileList() {
       return response.json();
     })
     .then((data) => {
-      console.log("Received data from /files/:", data); // Debugging
       if (data.fileList) {
         updateFileListDisplay(data.fileList);
       } else if (data.detail) {
@@ -261,12 +267,101 @@ function updateFileListDisplay(fileList) {
   fileList.forEach((file) => {
     var listItem = document.createElement("li");
     listItem.textContent = `${file.filename} (Uploaded on ${file.upload_time})`;
+    listItem.setAttribute('data-file-id', file.id);
+    listItem.style.cursor = 'pointer';
+
+    // Add click event listener to the list item
+    listItem.addEventListener('click', function () {
+      fetchFileData(file.id, file.filename);
+    });
+
     fileListContainer.appendChild(listItem);
   });
 }
 
-// Logout functionality
-document.getElementById("logoutBtn")?.addEventListener("click", function () {
-  localStorage.removeItem("accessToken");
-  window.location.href = "/login.html";
-});
+// Fetch the file data when a file is clicked
+function fetchFileData(fileId, filename) {
+  var accessToken = localStorage.getItem("accessToken");
+  fetch(`/file/${fileId}`, {
+    method: "GET",
+    headers: {
+      "Authorization": "Bearer " + accessToken,
+    },
+  })
+    .then((response) => response.json())
+    .then((data) => {
+      if (data.columns && data.data) {
+        displayTable(data.columns, data.data, filename);
+      } else if (data.message) {
+        alert(data.message);
+      } else {
+        alert("An error occurred while retrieving the file data.");
+      }
+    })
+    .catch((error) => {
+      console.error("Error fetching file data:", error);
+    });
+}
+
+// Display the data in a dynamic table
+function displayTable(columns, data, filename) {
+  // Create a modal popup to display the table
+  const modal = document.createElement('div');
+  modal.classList.add('modal');
+
+  // Modal content container
+  const modalContent = document.createElement('div');
+  modalContent.classList.add('modal-content');
+
+  // Close button
+  const closeButton = document.createElement('span');
+  closeButton.classList.add('close-button');
+  closeButton.innerHTML = '&times;';
+  closeButton.onclick = function() {
+    document.body.removeChild(modal);
+  };
+
+  // Table title
+  const title = document.createElement('h2');
+  title.textContent = filename;
+
+  // Create the table
+  const table = document.createElement('table');
+  table.classList.add('data-table');
+
+  // Create table header
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  columns.forEach(col => {
+    const th = document.createElement('th');
+    th.textContent = col;
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+
+  // Create table body
+  const tbody = document.createElement('tbody');
+  data.forEach(row => {
+    const tr = document.createElement('tr');
+    columns.forEach(col => {
+      const td = document.createElement('td');
+      td.textContent = row[col];
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(thead);
+  table.appendChild(tbody);
+
+  // Assemble modal content
+  modalContent.appendChild(closeButton);
+  modalContent.appendChild(title);
+  modalContent.appendChild(table);
+
+  // Add content to modal
+  modal.appendChild(modalContent);
+
+  // Append modal to body
+  document.body.appendChild(modal);
+}

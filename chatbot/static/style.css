@@ -1,4 +1,3 @@
-
 body {
   font-family: Arial, sans-serif;
   margin: 0;
@@ -20,7 +19,6 @@ body {
   height: 100vh;
   background-color: white;
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
-  /* border-radius: 8px; */
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -77,13 +75,28 @@ form {
   border-top: 1px solid #ccc;
 }
 
+/* General input styling for text and file inputs */
 input[type="text"],
-input[type="file"] {
+input[type="file"],
+input[type="password"],
+input[type="email"] {
   flex: 1;
   padding: 10px;
   margin-right: 5px;
   border: 1px solid #ccc;
   border-radius: 4px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Specific styling for login input box (if needed) */
+#loginInput {
+  border: 2px solid #4CAF50;  /* Example: green border for login input */
+  padding: 12px;
+  border-radius: 5px;
+  background-color: #f9f9f9;
+  width: 100%;
+  font-size: 16px;
 }
 
 button {
@@ -92,6 +105,10 @@ button {
   color: white;
   border: none;
   cursor: pointer;
+}
+
+button:hover {
+  background-color: #0a72bc;
 }
 
 .upload-container {
@@ -113,11 +130,13 @@ button {
   overflow-y: auto;
   box-sizing: border-box;
 }
+
 .history-list {
   flex-grow: 1;
   overflow-y: auto;
   margin-bottom: 10px;
 }
+
 .new-chat-container {
   display: flex;
   justify-content: center;
@@ -160,4 +179,66 @@ button {
 @keyframes blink-caret {
   from, to { border-color: transparent; }
   50% { border-color: black; }
+}
+
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-content {
+  background-color: #fff;
+  padding: 20px;
+  max-height: 80%;
+  overflow-y: auto;
+  border-radius: 5px;
+  position: relative;
+}
+
+.close-button {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+/* Table styles */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  border: 1px solid #ccc;
+  padding: 8px;
+  text-align: left;
+}
+
+.data-table th {
+  background-color: #f2f2f2;
+}
+
+#logoutBtn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 10px;
+  background-color: #ff4d4d;
+  color: white;
+  border: none;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+#logoutBtn:hover {
+  background-color: #ff1a1a !important;
 }

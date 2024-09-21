@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Login</title>
-  <link rel="stylesheet" href="/static/login.css" />
+  <link rel="stylesheet" href="/static/login.css?v=1.0" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -15,7 +15,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap"
     rel="stylesheet"
-  />
+  />s
 </head>
 <body>
   <header class="header">
@@ -27,12 +27,12 @@
     <form id="loginForm">
       <label for="email" id="label-email">이메일</label>
       <input
-        type="text"
+        type="email"
         name="username"
-        placeholder="Email"
         id="email"
         required
-        pattern="[^@\s]+@[^@\s]+\.[^@\s]+"
+        placeholder="Email"
+        style="border: 2px solid #a3a3a3; padding: 12px; border-radius: 10px;"
       />
       <label for="password" id="label-password">비밀번호</label>
       <input
@@ -55,57 +55,6 @@
       <button type="submit" class="reset-password">비밀번호 재설정</button>
     </form>
   </div>
-
-  <!-- Updated Script -->
-  <script>
-    document.addEventListener("DOMContentLoaded", function () {
-      var loginForm = document.getElementById("loginForm");
-      if (loginForm) {
-        loginForm.addEventListener("submit", async function (event) {
-          event.preventDefault(); // Prevent the form from submitting normally
-
-          // Create URLSearchParams to hold form data in application/x-www-form-urlencoded format
-          var formData = new URLSearchParams();
-          formData.append('username', document.getElementById('email').value.trim());
-          formData.append('password', document.getElementById('password').value.trim());
-
-          try {
-            // Send the login data to the backend
-            let response = await fetch("/token", {
-              method: "POST",
-              headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-              },
-              body: formData.toString(),
-            });
-
-            if (response.ok) {
-              // Handle successful login
-              let data = await response.json();
-              // Store the access token in localStorage
-              localStorage.setItem("accessToken", data.access_token);
-              // Redirect to the main chat page
-              window.location.href = "index.html";
-            } else {
-              // Handle login failure
-              const mainContent = document.querySelector(".main-content");
-              mainContent.classList.add("shake-animation");
-              mainContent.addEventListener(
-                "animationend",
-                function () {
-                  mainContent.classList.remove("shake-animation");
-                },
-                { once: true }
-              );
-            }
-          } catch (error) {
-            console.error("Error logging in:", error);
-          }
-        });
-      } else {
-        console.error("The login form was not found.");
-      }
-    });
-  </script>
+  <script src="/static/login.js"></script>
 </body>
 </html>

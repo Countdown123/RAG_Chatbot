@@ -87,19 +87,24 @@ form {
   margin-top: 20px;
 }
 
-input[type="email"],
-input[type="password"], 
-.lower-login {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  width: 100%;
-  padding: 10px;
-  margin: 5px 0;
-  box-shadow: none;
-  border: 2px solid #a3a3a3;
-  border-radius: 10px;
+/* Target the input fields by their form id and input type */
+#loginForm input[type="email"],
+#loginForm input[type="password"] {
+  border: 2px solid #a3a3a3 !important;  /* Thicker border */
+  padding: 12px !important;  /* Consistent padding */
+  width: 100% !important;
+  margin: 5px 0 !important;
+  border-radius: 10px !important;  /* Rounded corners */
+  box-shadow: none !important; /* Remove any browser default shadow */
+  appearance: none !important; /* Remove default browser styles */
 }
+
+/* Focus state to highlight when clicked */
+#loginForm input[type="email"]:focus,
+#loginForm input[type="password"]:focus {
+  border-color: #487AFF !important; /* Blue border when focused */
+  outline: none !important; /* Remove default outline */
+} 
 
 .line {
   width: 50vh;

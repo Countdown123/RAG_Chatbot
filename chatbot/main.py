@@ -341,20 +341,25 @@ async def upload_file(
     db: Session = Depends(get_db),
 ):
     """
-    Endpoint to upload a file.
-    Only accepts .xlsx files and associates them with the current user.
+    Endpoint to upload files. Accepts .xlsx, .csv, and .pdf files.
+    Stores the file and updates the database.
     """
-    if file.filename.endswith(".xlsx"):
+    allowed_extensions = ["xlsx", "csv", "pdf"]
+    filename = file.filename
+    extension = filename.split(".")[-1].lower()
+
+    if extension in allowed_extensions:
         # Save the uploaded file to a directory
         upload_dir = "uploads"
         os.makedirs(upload_dir, exist_ok=True)
-        file_location = os.path.join(upload_dir, file.filename)
+        file_location = os.path.join(upload_dir, filename)
         with open(file_location, "wb") as f:
             content = await file.read()
             f.write(content)
+
         # Create a new File record in the database
         db_file = FileModel(
-            filename=file.filename,
+            filename=filename,
             filepath=file_location,
             upload_time=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             user_id=current_user.id,
@@ -362,15 +367,14 @@ async def upload_file(
         db.add(db_file)
         db.commit()
         db.refresh(db_file)
-        # Read the Excel file and convert it to HTML table
-        df = pd.read_excel(file_location)
-        table_html = df.to_html()
+
         # Retrieve the updated list of files
         files = db.query(FileModel).filter(FileModel.user_id == current_user.id).all()
         file_list = [
-            {"filename": f.filename, "upload_time": f.upload_time} for f in files
+            {"id": f.id, "filename": f.filename, "upload_time": f.upload_time}
+            for f in files
         ]
-        return {"tableData": table_html, "fileList": file_list}
+        return {"fileList": file_list}
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
@@ -385,6 +389,46 @@ async def get_uploaded_files(
     files = db.query(FileModel).filter(FileModel.user_id == current_user.id).all()
     file_list = [{"filename": f.filename, "upload_time": f.upload_time} for f in files]
     return {"fileList": file_list}
+
+
+@app.get("/file/{file_id}")
+async def get_file_data(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint to retrieve the contents of an uploaded file.
+    For .xlsx and .csv files, returns data as JSON.
+    For .pdf files, returns a message.
+    """
+    db_file = (
+        db.query(FileModel)
+        .filter(FileModel.id == file_id, FileModel.user_id == current_user.id)
+        .first()
+    )
+    if not db_file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    filename = db_file.filename
+    filepath = db_file.filepath
+    extension = filename.split(".")[-1].lower()
+
+    if extension in ["xlsx", "csv"]:
+        try:
+            if extension == "xlsx":
+                df = pd.read_excel(filepath)
+            else:  # csv
+                df = pd.read_csv(filepath)
+            data = df.to_dict(orient="records")
+            columns = df.columns.tolist()
+            return {"columns": columns, "data": data}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
+    elif extension == "pdf":
+        return {"message": "PDF file viewing is not supported in this application."}
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
 
 
 @app.get("/history/{chat_id}")
