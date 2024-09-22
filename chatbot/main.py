@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
-import shutil
+import numpy as np
 
 # Database setup
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
@@ -47,19 +47,16 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    chats = relationship("ChatHistory", back_populates="user")
     files = relationship("FileModel", back_populates="user")
 
 
 class ChatHistory(Base):
     __tablename__ = "chat_histories"
-    id = Column(Integer, primary_key=True, index=True)
-    chat_id = Column(String, index=True, unique=True, nullable=False)
+    chat_id = Column(String, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    messages = Column(Text, nullable=False)  # JSON serialized as text
-    timestamp = Column(String, default=datetime.utcnow().isoformat())
-    user = relationship("User", back_populates="chats")
-    files = relationship("FileModel", back_populates="chat")  # New relationship
+    messages = Column(Text, nullable=False)  # Store as JSON string
+    timestamp = Column(String, nullable=False)
+    files = relationship("FileModel", back_populates="chat")
 
 
 class FileModel(Base):
@@ -532,6 +529,7 @@ async def get_uploaded_files(
     return {"fileList": file_list}
 
 
+# Updated get_file_data endpoint
 @app.get("/file/{file_id}")
 async def get_file_data(
     file_id: int,
@@ -561,10 +559,26 @@ async def get_file_data(
                 df = pd.read_excel(filepath)
             else:  # csv
                 df = pd.read_csv(filepath)
+
+            # Log the DataFrame shape for debugging
+            print(f"Processing file '{filename}' with shape {df.shape}")
+
+            # Replace infinite values with NaN
+            df.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+            # Replace NaN with None (which becomes null in JSON)
+            df = df.where(pd.notnull(df), None)
+
+            # Convert DataFrame to dictionary
             data = df.to_dict(orient="records")
             columns = df.columns.tolist()
+
+            # Log a snippet of the data for debugging
+            print(f"First row of data: {data[0] if data else 'No data'}")
+
             return {"columns": columns, "data": data}
         except Exception as e:
+            print(f"Error processing file '{filename}': {e}")  # Logging
             raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
     elif extension == "pdf":
         return {"message": "PDF file viewing is not supported in this application."}

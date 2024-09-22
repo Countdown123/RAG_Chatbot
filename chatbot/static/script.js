@@ -262,7 +262,7 @@ function startNewChat() {
     document.getElementById("messageText").value = "";
 
     // Notify the server about the new chat session
-    window.ws.send(`new_chat:${currentChatId}`);
+    window.ws.send(`new_chat:${newChatId}`);
 
     // Display a welcome message for the new chat
     addMessageToDisplay("New chat started. How can I help you?", "received");
@@ -382,7 +382,6 @@ function handleFileUploadResponse(response) {
         }
     });
 }
-
 
 // Fetch the list of uploaded files for the current chat
 function fetchFileList(chatId = null) {
