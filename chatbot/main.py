@@ -1,5 +1,15 @@
 # main.py
 
+import os
+import json
+import uvicorn
+import asyncio
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from typing import List, Optional
+from pathlib import Path
+
 from fastapi import (
     FastAPI,
     WebSocket,
@@ -11,13 +21,11 @@ from fastapi import (
     status,
     Form,
 )
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from typing import List, Optional
-import uvicorn
-import json
-import pandas as pd
-import os
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.middleware.cors import CORSMiddleware
+
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, Text
@@ -25,11 +33,23 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from datetime import datetime, timedelta
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
-import numpy as np
+
+from langchain_openai import ChatOpenAI
+from langchain_community.agent_toolkits import create_sql_agent
+from langchain_community.utilities import SQLDatabase
+
+from dotenv import load_dotenv
+import logging
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Disable LangChain tracing to avoid LangSmith authentication errors
+os.environ["LANGCHAIN_TRACING"] = "false"
 
 # Database setup
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
@@ -96,7 +116,7 @@ class Token(BaseModel):
 
 
 class TokenData(BaseModel):
-    email: str = None
+    email: Optional[str] = None
 
 
 class ChatMetadata(BaseModel):
@@ -180,6 +200,9 @@ async def get_current_user(
 if not os.path.exists("uploads"):
     os.makedirs("uploads")
 
+# Ensure the 'data' directory exists
+if not os.path.exists("data"):
+    os.makedirs("data")
 
 # FastAPI app initialization
 app = FastAPI()
@@ -207,16 +230,16 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        print("Client connected")
+        logger.info("Client connected")
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            print("Client disconnected")
+            logger.info("Client disconnected")
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
-        print(f"Sent message to client: {message}")
+        logger.info(f"Sent message to client: {message}")
 
 
 manager = ConnectionManager()
@@ -239,7 +262,7 @@ def save_chat_history_to_file(user_id: int, chat_id: str, messages: List[dict]):
     chat_history_file = chat_dir / f"{user_id}-{chat_id}-chat_history.json"
     with open(chat_history_file, "w") as f:
         json.dump(messages, f, indent=4)
-    print(f"Chat history saved to {chat_history_file}")
+    logger.info(f"Chat history saved to {chat_history_file}")
 
 
 def load_chat_history_from_file(user_id: int, chat_id: str) -> List[dict]:
@@ -267,7 +290,7 @@ def save_uploaded_file(user_id: int, chat_id: str, file: UploadFile) -> str:
     with open(file_path, "wb") as f:
         content = file.file.read()
         f.write(content)
-    print(f"File {file.filename} saved to {file_path}")
+    logger.info(f"File {file.filename} saved to {file_path}")
     return str(file_path)
 
 
@@ -335,11 +358,6 @@ async def get_chats(
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """
-    WebSocket endpoint for real-time communication.
-    Authenticates the user using the JWT token passed as a query parameter.
-    Saves chat histories to JSON files.
-    """
     token = websocket.query_params.get("token")
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -363,10 +381,17 @@ async def websocket_endpoint(websocket: WebSocket):
     chat_id = None
     messages = []
 
+    # Retrieve the OpenAI API key
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        logger.error("OpenAI API Key not found.")
+        await websocket.send_text("OpenAI API Key is not set.")
+        return
+
     try:
         while True:
             data = await websocket.receive_text()
-            print(f"Received message from client: {data}")
+            logger.info(f"Received message from client: {data}")
             if data.startswith("new_chat:"):
                 # Extract chat_id from the message
                 chat_id = data.split("new_chat:")[1]
@@ -380,7 +405,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 db.add(db_chat)
                 db.commit()
                 db.refresh(db_chat)
-                print(f"Started new chat session with ID: {chat_id}")
+                logger.info(f"Started new chat session with ID: {chat_id}")
                 # Initialize messages list
                 messages = []
                 # Save the empty chat history to JSON file
@@ -408,35 +433,80 @@ async def websocket_endpoint(websocket: WebSocket):
                             "timestamp": datetime.utcnow().isoformat(),
                         }
                         messages.append(sent_message)
-                        # Echo the message back or implement chatbot logic here
-                        response = f"Echo: {data}"
-                        await websocket.send_text(response)
-                        # Append the received message
-                        received_message = {
-                            "type": "received",
-                            "content": response,
-                            "timestamp": datetime.utcnow().isoformat(),
-                        }
-                        messages.append(received_message)
-                        # Update the database
-                        db_chat.messages = json.dumps(messages)
-                        db.commit()
-                        # Save the updated chat history to JSON file
-                        save_chat_history_to_file(user.id, chat_id, messages)
+                        # Check for uploaded data files
+                        uploaded_files = (
+                            db.query(FileModel)
+                            .filter(
+                                FileModel.chat_id == chat_id,
+                                FileModel.user_id == user.id,
+                            )
+                            .all()
+                        )
+                        valid_extensions = ["xlsx", "xls", "csv"]
+                        data_files = [
+                            f
+                            for f in uploaded_files
+                            if f.filename.split(".")[-1].lower() in valid_extensions
+                        ]
+                        if not data_files:
+                            error_msg = "No data files uploaded. Please upload a csv, xlsx, or xls file."
+                            await websocket.send_text(error_msg)
+                            logger.error(error_msg)
+                            continue
+                        else:
+                            # Initialize the agent
+                            llm = ChatOpenAI(
+                                model_name="gpt-3.5-turbo",
+                                temperature=0,
+                                openai_api_key=openai_api_key,
+                            )
+                            db_path = "data/new.db"
+                            db_sql = SQLDatabase.from_uri(f"sqlite:///{db_path}")
+
+                            agent_executor = create_sql_agent(
+                                llm=llm,
+                                db=db_sql,
+                                agent_type="openai-tools",
+                                verbose=True,
+                            )
+                            # Process the message with the agent
+                            try:
+                                # Since agent_executor.run might be blocking, use run_in_executor
+                                loop = asyncio.get_event_loop()
+                                response = await loop.run_in_executor(
+                                    None, agent_executor.run, data
+                                )
+                            except Exception as e:
+                                logger.error(f"Error during agent execution: {e}")
+                                response = "Sorry, I could not process your request."
+
+                            await websocket.send_text(response)
+                            # Append the received message
+                            received_message = {
+                                "type": "received",
+                                "content": response,
+                                "timestamp": datetime.utcnow().isoformat(),
+                            }
+                            messages.append(received_message)
+                            # Update the database
+                            db_chat.messages = json.dumps(messages)
+                            db.commit()
+                            # Save the updated chat history to JSON file
+                            save_chat_history_to_file(user.id, chat_id, messages)
                     else:
                         error_msg = "Error: Chat session not found."
                         await websocket.send_text(error_msg)
-                        print("Error: Chat session not found.")
+                        logger.error("Error: Chat session not found.")
                 else:
                     # No chat_id yet, send an error message
                     error_msg = "Error: No chat session established."
                     await websocket.send_text(error_msg)
-                    print("Error: No chat session established.")
+                    logger.error("Error: No chat session established.")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         db.close()
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         manager.disconnect(websocket)
         db.close()
 
@@ -444,15 +514,11 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.post("/upload/")
 async def upload_file(
     file: UploadFile = File(...),
-    chat_id: str = Form(...),  # Add chat_id as part of the form
+    chat_id: str = Form(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Endpoint to upload files. Accepts .xlsx, .csv, and .pdf files.
-    Saves the file under the specific chat directory and updates the database.
-    """
-    allowed_extensions = ["xlsx", "csv", "pdf"]
+    allowed_extensions = ["xlsx", "xls", "csv", "pdf"]
     filename = file.filename
     extension = filename.split(".")[-1].lower()
 
@@ -472,13 +538,13 @@ async def upload_file(
         try:
             file_path = save_uploaded_file(current_user.id, chat_id, file)
         except Exception as e:
-            print(f"Error saving uploaded file: {e}")
+            logger.error(f"Error saving uploaded file: {e}")
             raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
 
         # Create a new File record in the database
         db_file = FileModel(
             filename=filename,
-            filepath=file_path,  # Store the full file path
+            filepath=file_path,
             upload_time=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             user_id=current_user.id,
             chat_id=chat_id,
@@ -488,10 +554,45 @@ async def upload_file(
             db.commit()
             db.refresh(db_file)
         except Exception as e:
-            print(f"Error saving file to database: {e}")
+            logger.error(f"Error saving file to database: {e}")
             raise HTTPException(
                 status_code=500, detail="Failed to save file information."
             )
+
+        # If the file is a data file, process it and load into SQLite database
+        if extension in ["xlsx", "xls", "csv"]:
+            # Read the file into a DataFrame
+            try:
+                if extension == "csv":
+                    # Adjust parameters based on your CSV file structure
+                    df = pd.read_csv(file_path, header=None)
+                else:
+                    df = pd.read_excel(file_path, header=None)
+                # Assign default column names
+                df.columns = [f"column_{i}" for i in range(len(df.columns))]
+                # Clean column names
+                df.columns = [str(col).strip().replace(" ", "_") for col in df.columns]
+                # Replace infinite values with NaN
+                df.replace([np.inf, -np.inf], np.nan, inplace=True)
+                # Replace NaN with 0
+                df.fillna(0, inplace=True)
+                # Create an engine to the SQLite database
+                data_db_path = "data/new.db"
+                data_engine = create_engine(f"sqlite:///{data_db_path}", echo=False)
+                # Replace hyphens with underscores in chat_id
+                sanitized_chat_id = chat_id.replace("-", "_")
+                # Provide a table name with sanitized chat_id
+                table_name = f"table_{current_user.id}_{sanitized_chat_id}_{db_file.id}"
+                # Write the DataFrame into the SQLite database
+                df.to_sql(table_name, con=data_engine, if_exists="replace", index=False)
+                logger.info(
+                    f"Data from file '{filename}' loaded into table '{table_name}'"
+                )
+            except Exception as e:
+                logger.error(f"Error processing file '{filename}': {e}")
+                raise HTTPException(
+                    status_code=500, detail=f"Error processing file: {e}"
+                )
 
         # Retrieve the updated list of files for this chat
         files = (
@@ -529,7 +630,6 @@ async def get_uploaded_files(
     return {"fileList": file_list}
 
 
-# Updated get_file_data endpoint
 @app.get("/file/{file_id}")
 async def get_file_data(
     file_id: int,
@@ -553,32 +653,32 @@ async def get_file_data(
     filepath = db_file.filepath
     extension = filename.split(".")[-1].lower()
 
-    if extension in ["xlsx", "csv"]:
+    if extension in ["xlsx", "xls", "csv"]:
         try:
-            if extension == "xlsx":
+            if extension in ["xlsx", "xls"]:
                 df = pd.read_excel(filepath)
             else:  # csv
                 df = pd.read_csv(filepath)
 
             # Log the DataFrame shape for debugging
-            print(f"Processing file '{filename}' with shape {df.shape}")
+            logger.info(f"Processing file '{filename}' with shape {df.shape}")
 
             # Replace infinite values with NaN
             df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
-            # Replace NaN with None (which becomes null in JSON)
-            df = df.where(pd.notnull(df), None)
+            # Replace NaN with 0
+            df.fillna(0, inplace=True)
 
             # Convert DataFrame to dictionary
             data = df.to_dict(orient="records")
             columns = df.columns.tolist()
 
             # Log a snippet of the data for debugging
-            print(f"First row of data: {data[0] if data else 'No data'}")
+            logger.info(f"First row of data: {data[0] if data else 'No data'}")
 
-            return {"columns": columns, "data": data}
+            return JSONResponse(content={"columns": columns, "data": data})
         except Exception as e:
-            print(f"Error processing file '{filename}': {e}")  # Logging
+            logger.error(f"Error processing file '{filename}': {e}")  # Logging
             raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
     elif extension == "pdf":
         return {"message": "PDF file viewing is not supported in this application."}
