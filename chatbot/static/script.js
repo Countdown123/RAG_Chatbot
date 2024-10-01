@@ -142,7 +142,8 @@ function updateChatListDisplay(chatList) {
         const listItem = document.createElement("li");
         listItem.classList.add("history-item");
         listItem.id = `chat-${chat.chat_id}`;
-        listItem.textContent = `Chat from ${chat.timestamp} (${chat.messages} messages)`;
+        const timestamp = new Date(chat.timestamp).toLocaleString();
+        listItem.textContent = `Chat from ${timestamp} (${chat.messages} messages)`;
         listItem.onclick = () => loadChatContent(chat.chat_id);
         chatHistoryList.appendChild(listItem);
     });
@@ -214,7 +215,7 @@ function addMessageToDisplay(text, type) {
         if (!chatHistories[currentChatId]) {
             chatHistories[currentChatId] = [];
         }
-        chatHistories[currentChatId].push({ type, content: text, timestamp: new Date().toISOString() });
+        chatHistories[currentChatId].push({ type, content: text, timestamp: new Date().toISOString().toLocaleString() });
         updateChatHistoryEntry(currentChatId, new Date().toLocaleString(), chatHistories[currentChatId].length);
     }
 }
@@ -233,7 +234,7 @@ function createNewChatHistoryEntry(chatId, timestamp) {
     const historyItem = document.createElement("li");
     historyItem.classList.add("history-item");
     historyItem.id = `chat-${chatId}`;
-    historyItem.textContent = `Chat from ${timestamp} (0 messages)`;
+    historyItem.textContent = `Chat from ${timestamp.toLocaleString()} (0 messages)`;
     historyItem.onclick = () => loadChatContent(chatId);
     chatHistoryList.insertBefore(historyItem, chatHistoryList.firstChild);
 }
@@ -242,7 +243,7 @@ function createNewChatHistoryEntry(chatId, timestamp) {
 function updateChatHistoryEntry(chatId, timestamp, messageCount) {
     const historyItem = document.getElementById(`chat-${chatId}`);
     if (historyItem) {
-        historyItem.textContent = `Chat from ${timestamp} (${messageCount} messages)`;
+        historyItem.textContent = `Chat from ${timestamp.toLocaleString()} (${messageCount} messages)`;
     }
 }
 

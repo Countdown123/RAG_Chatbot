@@ -301,7 +301,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     chat_id=chat_id,
                     user_id=user.id,
                     messages=json.dumps([]),
-                    timestamp=datetime.utcnow().isoformat(),
+                    timestamp=datetime.now().isoformat(),
                 )
                 db.add(db_chat)
                 db.commit()
@@ -331,7 +331,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         sent_message = {
                             "type": "sent",
                             "content": data,
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now().isoformat(),
                         }
                         messages.append(sent_message)
                         # Check for uploaded data files
@@ -386,7 +386,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             received_message = {
                                 "type": "received",
                                 "content": response,
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": datetime.now().isoformat(),
                             }
                             messages.append(received_message)
                             # Update the database
@@ -446,7 +446,7 @@ async def upload_file(
         db_file = FileModel(
             filename=filename,
             filepath=file_path,
-            upload_time=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            upload_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             user_id=current_user.id,
             chat_id=chat_id,
         )
