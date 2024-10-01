@@ -26,11 +26,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy import create_engine
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 
@@ -40,6 +37,12 @@ from langchain_community.utilities import SQLDatabase
 
 from dotenv import load_dotenv
 import logging
+
+from models import *
+import models
+from database import engine, get_db, SessionLocal
+models.Base.metadata.create_all(bind=engine)
+from user.user_crud import *
 
 # Load environment variables from .env file
 load_dotenv()
@@ -51,50 +54,6 @@ logger = logging.getLogger(__name__)
 # Disable LangChain tracing to avoid LangSmith authentication errors
 os.environ["LANGCHAIN_TRACING"] = "false"
 
-# Database setup
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-
-# Models
-class User(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    files = relationship("FileModel", back_populates="user")
-
-
-class ChatHistory(Base):
-    __tablename__ = "chat_histories"
-    chat_id = Column(String, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    messages = Column(Text, nullable=False)  # Store as JSON string
-    timestamp = Column(String, nullable=False)
-    files = relationship("FileModel", back_populates="chat")
-
-
-class FileModel(Base):
-    __tablename__ = "files"
-    id = Column(Integer, primary_key=True, index=True)
-    filename = Column(String, nullable=False)
-    filepath = Column(String, nullable=False)  # Store the full file path
-    upload_time = Column(String, nullable=False)  # Store the upload time as a string
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    chat_id = Column(
-        String, ForeignKey("chat_histories.chat_id"), nullable=False
-    )  # New field
-    user = relationship("User", back_populates="files")
-    chat = relationship("ChatHistory", back_populates="files")  # Establish relationship
-
-
-Base.metadata.create_all(bind=engine)
-
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -103,73 +62,15 @@ SECRET_KEY = "your-secret-key"  # Replace with a secure key in production
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-
-# Pydantic models
-class UserCreate(BaseModel):
-    email: str
-    password: str
-
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-
-class TokenData(BaseModel):
-    email: Optional[str] = None
-
-
-class ChatMetadata(BaseModel):
-    chat_id: str
-    timestamp: str
-    messages: int
-
-
 # OAuth2 setup
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-
-# Helper functions
-def get_db():
-    """
-    Dependency function to get a database session.
-    Closes the session after the request is finished.
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def get_user(db: Session, email: str):
-    return db.query(User).filter(User.email == email).first()
-
-
-def create_user(db: Session, user: UserCreate):
-    hashed_password = pwd_context.hash(user.password)
-    db_user = User(email=user.email, hashed_password=hashed_password)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
-
-
-def authenticate_user(db: Session, email: str, password: str):
-    user = get_user(db, email)
-    if user is None:
-        return False
-    if not pwd_context.verify(password, user.hashed_password):
-        return False
-    return user
-
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+        expire = datetime.now() + timedelta(minutes=15)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -725,25 +626,25 @@ async def get_chat_history(
 # Serve HTML pages
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
-    with open("templates/index.html") as f:
+    with open("templates/index.html", encoding='UTF-8') as f:
         return f.read()
 
 
 @app.get("/index.html", response_class=HTMLResponse)
 async def read_index_html():
-    with open("templates/index.html") as f:
+    with open("templates/index.html", encoding='UTF-8') as f:
         return f.read()
 
 
 @app.get("/login.html", response_class=HTMLResponse)
 async def read_login():
-    with open("templates/login.html") as f:
+    with open("templates/login.html", encoding='UTF-8') as f:
         return f.read()
 
 
 @app.get("/signup.html", response_class=HTMLResponse)
 async def read_signup():
-    with open("templates/signup.html") as f:
+    with open("templates/signup.html", encoding='UTF-8') as f:
         return f.read()
 
 
