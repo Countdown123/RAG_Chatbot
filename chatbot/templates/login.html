@@ -1,0 +1,60 @@
+<!-- templates/login.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login</title>
+  <link rel="stylesheet" href="/static/login.css?v=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap"
+    rel="stylesheet"
+  />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap"
+    rel="stylesheet"
+  />
+</head>
+<body>
+  <header class="header">
+    <div class="logo"><a href="/" class="title-logo">SERVICE</a></div>
+  </header>
+
+  <div class="main-content">
+    <h2 class="info">이메일로 로그인</h2>
+    <form id="loginForm">
+      <label for="email" id="label-email">이메일</label>
+      <input
+        type="email"
+        name="username"
+        id="email"
+        required
+        placeholder="Email"
+        style="border: 2px solid #a3a3a3; padding: 12px; border-radius: 10px;"
+      />
+      <label for="password" id="label-password">비밀번호</label>
+      <input
+        type="password"
+        name="password"
+        placeholder="Password"
+        id="password"
+        required
+      />
+      <button type="submit" class="lower-login">로그인</button>
+    </form>
+
+    <div class="line">또는</div>
+
+    <form action="/signup.html" method="get">
+      <button type="submit" class="signup">회원가입</button>
+    </form>
+
+    <form action="/" method="get">
+      <button type="submit" class="reset-password">비밀번호 재설정</button>
+    </form>
+  </div>
+  <script src="/static/login.js"></script>
+</body>
+</html>

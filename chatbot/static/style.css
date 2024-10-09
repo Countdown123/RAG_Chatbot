@@ -1,0 +1,247 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.main-container {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+}
+
+.chat-container {
+  width: 58%;
+  height: 96vh;
+  background-color: white;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-radius: 5%;
+  margin: 5px 5px 5px 5px;
+}
+
+.right-container {
+  width: 60%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+
+#messages {
+  list-style: none;
+  padding: 20px;
+  overflow-y: auto;
+  flex-grow: 1;
+  margin: 0;
+}
+
+#messages li {
+  margin-bottom: 10px;
+  border-radius: 20px;
+  padding: 10px 20px;
+  color: white;
+  line-height: 1.4;
+  max-width: 80%;
+}
+
+#messages li.sent {
+  background-color: #0b93f6;
+  align-self: flex-end;
+}
+
+#messages li.received {
+  background-color: #e5e5ea;
+  color: black;
+  align-self: flex-start;
+}
+
+.typing {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.received {
+  white-space: normal;
+  word-wrap: break-word;
+}
+
+form {
+  display: flex;
+  padding: 10px;
+  border-top: 1px solid #ccc;
+}
+
+/* General input styling for text and file inputs */
+input[type="text"],
+input[type="file"],
+input[type="password"],
+input[type="email"] {
+  flex: 1;
+  padding: 10px;
+  margin-right: 5px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Specific styling for login input box (if needed) */
+#loginInput {
+  border: 2px solid #4CAF50;  /* Example: green border for login input */
+  padding: 12px;
+  border-radius: 5px;
+  background-color: #f9f9f9;
+  width: 100%;
+  font-size: 16px;
+}
+
+button {
+  padding: 10px 20px;
+  background-color: #0b93f6;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+button:hover {
+  background-color: #0a72bc;
+}
+
+.upload-container {
+  height: 50%;
+  background-color: #f0f0f0;
+  padding: 20px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-container {
+  height: 50%;
+  background-color: #e0e0e0;
+  padding: 20px;
+  padding-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.history-list {
+  flex-grow: 1;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+
+.new-chat-container {
+  display: flex;
+  justify-content: center;
+  padding-top: 10px;
+  border-top: 1px solid #ccc;
+}
+
+#newChatBtn {
+  padding: 10px 20px;
+  background-color: #0b93f6;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+#newChatBtn:hover {
+  background-color: #0a72bc;
+}
+
+.history-item {
+  background-color: white;
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.history-item:hover {
+  background-color: #d0d0d0;
+}
+
+@keyframes typing {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+@keyframes blink-caret {
+  from, to { border-color: transparent; }
+  50% { border-color: black; }
+}
+
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-content {
+  background-color: #fff;
+  padding: 20px;
+  max-height: 80%;
+  overflow-y: auto;
+  border-radius: 5px;
+  position: relative;
+}
+
+.close-button {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+/* Table styles */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  border: 1px solid #ccc;
+  padding: 8px;
+  text-align: left;
+}
+
+.data-table th {
+  background-color: #f2f2f2;
+}
+
+#logoutBtn {
+  position: fixed;
+  bottom: 120px;
+  right: 20px;
+  padding: 10px;
+  background-color: #ff4d4d;
+  color: white;
+  border: none;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+#logoutBtn:hover {
+  background-color: #ff1a1a !important;
+}
