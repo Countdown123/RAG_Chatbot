@@ -36,6 +36,15 @@ class FileModel(Base):
     user = relationship("User", back_populates="files")
     chat = relationship("ChatHistory", back_populates="files")  # Establish relationship
 
+
+class FileMetadata(Base):
+    __tablename__ = "file_metadata"
+    id = Column(Integer, primary_key=True, index=True)
+    chat_id = Column(String, ForeignKey("chat_histories.chat_id"), nullable=False)
+    file_id = Column(Integer, ForeignKey("files.id"), nullable=False)
+    file_metadata = Column(Text, nullable=False)
+
+
 class UserCreate(BaseModel):
     email: str
     password: str
