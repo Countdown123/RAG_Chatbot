@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
+import models
 
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
@@ -34,15 +35,15 @@ from jose import JWTError, jwt
 from langchain_openai import ChatOpenAI
 from langchain_community.agent_toolkits import create_sql_agent
 from langchain_community.utilities import SQLDatabase
+from langchain_community.document_loaders import PyPDFLoader
 
 from dotenv import load_dotenv
 import logging
 
-from models import *
-import models
 from database import engine, get_db, SessionLocal
 models.Base.metadata.create_all(bind=engine)
 from user.user_crud import *
+from models import *
 
 # Load environment variables from .env file
 load_dotenv()
@@ -361,7 +362,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 temperature=0,
                                 openai_api_key=openai_api_key,
                             )
-                            db_path = "data/new.db"
+                            db_path = "data/chatbot_data.db"
                             db_sql = SQLDatabase.from_uri(f"sqlite:///{db_path}")
 
                             agent_executor = create_sql_agent(
@@ -478,7 +479,7 @@ async def upload_file(
                 # Replace NaN with 0
                 df.fillna(0, inplace=True)
                 # Create an engine to the SQLite database
-                data_db_path = "data/new.db"
+                data_db_path = "data/chatbot_data.db"
                 data_engine = create_engine(f"sqlite:///{data_db_path}", echo=False)
                 # Replace hyphens with underscores in chat_id
                 sanitized_chat_id = chat_id.replace("-", "_")
@@ -621,6 +622,112 @@ async def get_chat_history(
         }
     else:
         raise HTTPException(status_code=404, detail="Chat not found")
+    
+@app.post("/upload_pdf/")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    chat_id: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # 파일 저장 경로 설정
+    pdf_path = f"uploads/{file.filename}"
+    with open(pdf_path, "wb") as f:
+        f.write(await file.read())
+
+    # 새로운 파일에 대한 파일 정보를 데이터베이스에서 찾기
+    db_file = db.query(FileModel).filter(FileModel.chat_id == chat_id, FileModel.filename == file.filename).first()
+
+    if db_file:
+        # 메타데이터가 이미 저장되어 있는지 확인
+        existing_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
+        if existing_metadata:
+            # 이미 메타데이터가 존재하면 재생성하지 않고 반환
+            return {"metadata": json.loads(existing_metadata.file_metadata)}
+
+        # GPT 모델을 사용하여 메타데이터 생성
+        pdf_loader = PyPDFLoader(pdf_path)
+        docs = pdf_loader.load()
+
+        full_text = "\n".join([doc.page_content for doc in docs])  # 전체 PDF 내용을 하나로 결합
+        llm = ChatOpenAI(model="gpt-4")
+
+        prompt = f"""
+        Analyze the following PDF content and extract the metadata with the following structure:
+        
+        - Document Title: Title of the document
+        - Authors: List of authors
+        - Section Headings: Key section headings from the document
+        - Key Topics: Major topics discussed in the document
+        - Notable Data Points: Any significant statistics, numbers, or facts in the text
+        - Conclusion: Summary of the conclusion, if available
+
+        Use the following PDF text to extract the metadata:
+
+        PDF Text: {full_text[:1000]}
+
+        Return the metadata as a structured key-value format.
+        """
+
+        # GPT 모델을 사용하여 메타데이터 생성
+        metadata_response = llm.invoke(prompt)
+
+        # 응답을 파싱하여 메타데이터를 key-value 형식으로 변환
+        metadata = {}
+        if metadata_response:  # 응답이 있는 경우에만 처리
+            if hasattr(metadata_response, 'content'):
+                metadata_text = metadata_response.content
+
+                lines = metadata_text.split("\n")
+                for line in lines:
+                    if ": " in line:
+                        key, value = line.split(": ", 1)
+                        metadata[key.strip()] = value.strip()
+            else:
+                metadata = {"Error": "Failed to parse metadata from GPT response"}
+        else:
+            metadata = {"Error": "No metadata generated"}
+
+        # 메타데이터를 DB에 저장
+        db_metadata = FileMetadata(
+            chat_id=chat_id,
+            file_id=db_file.id,  # 고유한 파일 ID 사용
+            file_metadata=json.dumps(metadata)  # 메타데이터를 JSON으로 저장
+        )
+        db.add(db_metadata)
+        db.commit()
+
+    # key-value 쌍으로 파싱된 메타데이터 반환
+    return {"metadata": metadata}
+
+@app.get("/metadata/{file_id}")
+async def get_metadata(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # 파일 ID로 메타데이터 조회
+    metadata_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+
+    if not metadata_record:
+        raise HTTPException(status_code=404, detail=f"Metadata not found for file ID: {file_id}")
+
+    return {"metadata": json.loads(metadata_record.file_metadata)}
+
+
+@app.get("/metadata/{file_id}")
+async def get_metadata(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # 파일 ID로 메타데이터 조회
+    metadata_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+
+    if not metadata_record:
+        raise HTTPException(status_code=404, detail=f"Metadata not found for file ID: {file_id}")
+
+    return {"metadata": json.loads(metadata_record.file_metadata)}
 
 
 # Serve HTML pages
