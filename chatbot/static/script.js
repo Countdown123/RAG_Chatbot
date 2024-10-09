@@ -261,7 +261,6 @@ function startNewChat() {
     // Clear the current chat display and input field
     document.getElementById("messages").innerHTML = "";
     document.getElementById("messageText").value = "";
-
     // Notify the server about the new chat session
     window.ws.send(`new_chat:${newChatId}`);
 
@@ -274,6 +273,10 @@ function startNewChat() {
 
     // Refresh the chat list
     fetchChatList();
+    
+    loadChatContent(currentChatId);
+    // fetchChatList();
+
 }
 
 // Save chat history to the backend
@@ -452,8 +455,57 @@ function createFileListItem(file) {
     listItem.style.cursor = 'pointer';
     listItem.onclick = () => fetchFileData(file.id, file.filename);
 
+    // PDF 파일일 경우 클릭 시 메타데이터 조회
+    if (file.filename.endsWith(".pdf")) {
+        listItem.onclick = () => fetchAndShowMetadata(file.id, file.filename);
+    } else {
+        listItem.onclick = () => fetchFileData(file.id, file.filename); // 기존 파일 데이터 조회 함수
+    }
+
     return listItem;
 }
+
+// PDF 파일 클릭 시 메타데이터 조회 및 표시
+function fetchAndShowMetadata(fileId, filename) {
+    const accessToken = localStorage.getItem("accessToken");
+
+    console.log("Fetching metadata for fileId:", fileId); // fileId 출력 확인
+
+    // 메타데이터 테이블 초기화
+    clearMetadataTable();
+
+    // 서버에서 메타데이터 가져오기
+    fetch(`/metadata/${fileId}`, {
+        method: "GET",
+        headers: {
+            "Authorization": `Bearer ${accessToken}`,
+        },
+    })
+        .then(response => {
+            if (response.status === 401) {
+                alert("Session expired. Please log in again.");
+                localStorage.removeItem("accessToken");
+                redirectToLogin();
+                throw new Error("Unauthorized");
+            }
+            if (!response.ok) {
+                throw new Error("Failed to fetch metadata.");
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.metadata) {
+                showMetadataTable(data.metadata);  // 메타데이터 테이블로 표시
+            } else {
+                alert("No metadata found for this file.");
+            }
+        })
+        .catch(error => {
+            console.error("Error fetching metadata:", error);
+            alert("Error fetching metadata. Please try again.");
+        });
+}
+
 
 // Fetch file data when a file is clicked
 function fetchFileData(fileId, filename) {
@@ -656,4 +708,114 @@ function displayChatFiles(files) {
 
     // Ensure the file list container is visible
     document.getElementById("fileListContainer").style.display = "block";  
+}
+
+// 파일 업로드 후 메타데이터 테이블 표시
+document.getElementById('uploadForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const fileInput = document.getElementById('fileInput');
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    formData.append('chat_id', currentChatId);  
+
+    // JWT 토큰 가져오기
+    const accessToken = localStorage.getItem('accessToken');
+
+    const response = await fetch('/upload_pdf/', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`, 
+        },
+        body: formData
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+        // 기존 메타데이터 초기화
+        clearMetadataTable();  // 기존 메타데이터 초기화 함수 호출
+    
+        // 새로운 메타데이터 바로 표시
+        showMetadataTable(data.metadata);  // 동적으로 받은 메타데이터 표시
+    } else {
+        console.error("Error uploading PDF:", data);
+        alert(`Error: ${data.detail}`);
+    }
+    
+});
+
+// 메타데이터 테이블 초기화 함수
+function clearMetadataTable() {
+    const existingTable = document.getElementById("metadataTable");
+    if (existingTable) {
+        existingTable.remove();  // 기존 테이블을 제거
+    }
+
+    // 기존 모달 제거
+    const existingModal = document.querySelector('.modal');
+    if (existingModal) {
+        existingModal.remove();  
+    }
+}
+
+function showMetadataTable(metadata) {
+    const popup = document.createElement("div");
+    popup.classList.add("modal");
+
+    const popupContent = document.createElement("div");
+    popupContent.classList.add("modal-content");
+
+    const closeButton = document.createElement("button");
+    closeButton.textContent = "Close";
+    closeButton.onclick = function () {
+        document.body.removeChild(popup);
+    };
+
+    const tableElement = document.createElement("table");
+    tableElement.id = "metadataTable";  // 새 메타데이터 테이블
+
+    const thead = document.createElement("thead");
+    const headerRow = document.createElement("tr");
+    const thKey = document.createElement("th");
+    thKey.textContent = "Key";
+    const thValue = document.createElement("th");
+    thValue.textContent = "Value";
+    headerRow.appendChild(thKey);
+    headerRow.appendChild(thValue);
+    thead.appendChild(headerRow);
+    tableElement.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+
+    // 메타데이터를 테이블에 추가
+    for (const key in metadata) {
+        if (metadata.hasOwnProperty(key)) {
+            const row = document.createElement("tr");
+
+            const tdKey = document.createElement("td");
+            tdKey.textContent = key;
+
+            const tdValue = document.createElement("td");
+            if (Array.isArray(metadata[key])) {
+                tdValue.innerHTML = metadata[key].join("<br>");  
+            } else if (typeof metadata[key] === "object") {
+                tdValue.innerHTML = JSON.stringify(metadata[key], null, 2).replace(/\n/g, "<br>").replace(/ /g, "&nbsp;");
+            } else {
+                tdValue.textContent = metadata[key];
+            }
+
+            row.appendChild(tdKey);
+            row.appendChild(tdValue);
+            tbody.appendChild(row);
+        }
+    }
+
+    tableElement.appendChild(tbody);
+    popupContent.appendChild(tableElement);
+    popupContent.appendChild(closeButton);
+    popup.appendChild(popupContent);
+    document.body.appendChild(popup);
+
+    popup.style.display = 'block';
 }
