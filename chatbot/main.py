@@ -583,7 +583,11 @@ async def get_file_data(
             logger.error(f"Error processing file '{filename}': {e}")  # Logging
             raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
     elif extension == "pdf":
-        return {"message": "PDF file viewing is not supported in this application."}
+        metadata_record = (
+            db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
+        )
+        return {"metadata": json.loads(metadata_record.file_metadata)}
+        # return {"message": "PDF file viewing is not supported in this application."}
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
@@ -622,7 +626,7 @@ async def get_chat_history(
         }
     else:
         raise HTTPException(status_code=404, detail="Chat not found")
-    
+
 @app.post("/upload_pdf/")
 async def upload_pdf(
     file: UploadFile = File(...),
@@ -674,19 +678,22 @@ async def upload_pdf(
 
         # 응답을 파싱하여 메타데이터를 key-value 형식으로 변환
         metadata = {}
-        if metadata_response:  # 응답이 있는 경우에만 처리
-            if hasattr(metadata_response, 'content'):
-                metadata_text = metadata_response.content
+        if metadata_response and hasattr(metadata_response, "content"):
+            metadata_text = metadata_response.content
 
-                lines = metadata_text.split("\n")
-                for line in lines:
-                    if ": " in line:
-                        key, value = line.split(": ", 1)
-                        metadata[key.strip()] = value.strip()
-            else:
-                metadata = {"Error": "Failed to parse metadata from GPT response"}
+            lines = metadata_text.split("\n")
+            for line in lines:
+                if ": " in line:
+                    key, value = line.split(": ", 1)
+                    metadata[key.strip()] = value.strip()
         else:
-            metadata = {"Error": "No metadata generated"}
+            metadata = {
+                "Error": (
+                    "Failed to parse metadata from GPT response"
+                    if metadata_response
+                    else "No metadata generated"
+                )
+            }
 
         # 메타데이터를 DB에 저장
         db_metadata = FileMetadata(
@@ -700,20 +707,6 @@ async def upload_pdf(
     # key-value 쌍으로 파싱된 메타데이터 반환
     return {"metadata": metadata}
 
-@app.get("/metadata/{file_id}")
-async def get_metadata(
-    file_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    # 파일 ID로 메타데이터 조회
-    metadata_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
-
-    if not metadata_record:
-        raise HTTPException(status_code=404, detail=f"Metadata not found for file ID: {file_id}")
-
-    return {"metadata": json.loads(metadata_record.file_metadata)}
-
 
 @app.get("/metadata/{file_id}")
 async def get_metadata(
@@ -728,7 +721,6 @@ async def get_metadata(
         raise HTTPException(status_code=404, detail=f"Metadata not found for file ID: {file_id}")
 
     return {"metadata": json.loads(metadata_record.file_metadata)}
-
 
 # Serve HTML pages
 @app.get("/", response_class=HTMLResponse)
