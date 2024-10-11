@@ -440,88 +440,124 @@ async def upload_file(
     if not db_chat:
         raise HTTPException(status_code=404, detail="Chat session not found.")
 
+    # Retrieve existing files for the chat
+    existing_files = (
+        db.query(FileModel)
+        .filter(FileModel.user_id == current_user.id, FileModel.chat_id == chat_id)
+        .all()
+    )
+
+    # Count existing files of each type
+    existing_pdf_count = 0
+    existing_csv_xlsx_count = 0
+
+    for f in existing_files:
+        extension = f.filename.split(".")[-1].lower()
+        if extension == "pdf":
+            existing_pdf_count += 1
+        elif extension in ["xlsx", "xls", "csv"]:
+            existing_csv_xlsx_count += 1
+
+    # Count the files being uploaded
+    pdf_count = 0
+    csv_xlsx_count = 0
+
+    for file in files:
+        filename = file.filename
+        extension = filename.split(".")[-1].lower()
+
+        if extension == "pdf":
+            pdf_count += 1
+        elif extension in ["xlsx", "xls", "csv"]:
+            csv_xlsx_count += 1
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {extension}")
+
+    # Check limits
+    if existing_pdf_count + pdf_count > 5:
+        raise HTTPException(status_code=400, detail="You can upload a maximum of 5 PDF files per chat.")
+    if existing_csv_xlsx_count + csv_xlsx_count > 1:
+        raise HTTPException(status_code=400, detail="You can upload a maximum of 1 CSV/XLSX file per chat.")
+
+    # Proceed with uploading files
     file_list = []
 
     for file in files:
         filename = file.filename
         extension = filename.split(".")[-1].lower()
 
-        if extension in allowed_extensions:
-            # Save the uploaded file to the chat's files directory
-            try:
-                file_path = save_uploaded_file(current_user.id, chat_id, file)
-            except Exception as e:
-                logger.error(f"Error saving uploaded file: {e}")
-                raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
+        # Save the uploaded file to the chat's files directory
+        try:
+            file_path = save_uploaded_file(current_user.id, chat_id, file)
+        except Exception as e:
+            logger.error(f"Error saving uploaded file: {e}")
+            raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
 
-            # Create a new File record in the database
-            db_file = FileModel(
-                filename=filename,
-                filepath=file_path,
-                upload_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                user_id=current_user.id,
-                chat_id=chat_id,
+        # Create a new File record in the database
+        db_file = FileModel(
+            filename=filename,
+            filepath=file_path,
+            upload_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            user_id=current_user.id,
+            chat_id=chat_id,
+        )
+        try:
+            db.add(db_file)
+            db.commit()
+            db.refresh(db_file)
+        except Exception as e:
+            logger.error(f"Error saving file to database: {e}")
+            raise HTTPException(
+                status_code=500, detail="Failed to save file information."
             )
+
+        # Process the file based on its type
+        if extension in ["xlsx", "xls", "csv"]:
+            # Process data files
             try:
-                db.add(db_file)
-                db.commit()
-                db.refresh(db_file)
+                if extension == "csv":
+                    df = pd.read_csv(file_path, header=None)
+                else:
+                    df = pd.read_excel(file_path, header=None)
+                # Assign default column names
+                df.columns = [f"column_{i}" for i in range(len(df.columns))]
+                # Clean column names
+                df.columns = [str(col).strip().replace(" ", "_") for col in df.columns]
+                # Replace infinite values with NaN
+                df.replace([np.inf, -np.inf], np.nan, inplace=True)
+                # Replace NaN with 0
+                df.fillna(0, inplace=True)
+                # Create an engine to the SQLite database
+                data_db_path = "data/chatbot_data.db"
+                data_engine = create_engine(f"sqlite:///{data_db_path}", echo=False)
+                # Replace hyphens with underscores in chat_id
+                sanitized_chat_id = chat_id.replace("-", "_")
+                # Provide a table name with sanitized chat_id
+                table_name = f"table_{current_user.id}_{sanitized_chat_id}_{db_file.id}"
+                # Write the DataFrame into the SQLite database
+                df.to_sql(table_name, con=data_engine, if_exists="replace", index=False)
+                logger.info(
+                    f"Data from file '{filename}' loaded into table '{table_name}'"
+                )
             except Exception as e:
-                logger.error(f"Error saving file to database: {e}")
+                logger.error(f"Error processing file '{filename}': {e}")
                 raise HTTPException(
-                    status_code=500, detail="Failed to save file information."
+                    status_code=500, detail=f"Error processing file: {e}"
                 )
+        elif extension == "pdf":
+            # For PDF files, generate and store metadata
+            metadata = generate_pdf_metadata(file_path)
+            new_metadata = FileMetadata(
+                file_id=db_file.id,
+                chat_id=db_file.chat_id,
+                file_metadata=json.dumps(metadata),
+            )
+            db.add(new_metadata)
+            db.commit()
+            logger.info(f"Generated and saved metadata for file ID: {db_file.id}")
 
-            # If the file is a data file, process it and load into SQLite database
-            if extension in ["xlsx", "xls", "csv"]:
-                # Read the file into a DataFrame
-                try:
-                    if extension == "csv":
-                        # Adjust parameters based on your CSV file structure
-                        df = pd.read_csv(file_path, header=None)
-                    else:
-                        df = pd.read_excel(file_path, header=None)
-                    # Assign default column names
-                    df.columns = [f"column_{i}" for i in range(len(df.columns))]
-                    # Clean column names
-                    df.columns = [str(col).strip().replace(" ", "_") for col in df.columns]
-                    # Replace infinite values with NaN
-                    df.replace([np.inf, -np.inf], np.nan, inplace=True)
-                    # Replace NaN with 0
-                    df.fillna(0, inplace=True)
-                    # Create an engine to the SQLite database
-                    data_db_path = "data/chatbot_data.db"
-                    data_engine = create_engine(f"sqlite:///{data_db_path}", echo=False)
-                    # Replace hyphens with underscores in chat_id
-                    sanitized_chat_id = chat_id.replace("-", "_")
-                    # Provide a table name with sanitized chat_id
-                    table_name = f"table_{current_user.id}_{sanitized_chat_id}_{db_file.id}"
-                    # Write the DataFrame into the SQLite database
-                    df.to_sql(table_name, con=data_engine, if_exists="replace", index=False)
-                    logger.info(
-                        f"Data from file '{filename}' loaded into table '{table_name}'"
-                    )
-                except Exception as e:
-                    logger.error(f"Error processing file '{filename}': {e}")
-                    raise HTTPException(
-                        status_code=500, detail=f"Error processing file: {e}"
-                    )
-            elif extension == "pdf":
-                # For PDF files, generate and store metadata
-                metadata = generate_pdf_metadata(file_path)
-                new_metadata = FileMetadata(
-                    file_id=db_file.id,
-                    chat_id=db_file.chat_id,
-                    file_metadata=json.dumps(metadata),
-                )
-                db.add(new_metadata)
-                db.commit()
-                logger.info(f"Generated and saved metadata for file ID: {db_file.id}")
-
-            # Append to file_list to return
-            file_list.append({"id": db_file.id, "filename": db_file.filename, "upload_time": db_file.upload_time})
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {extension}")
+        # Append to file_list to return
+        file_list.append({"id": db_file.id, "filename": db_file.filename, "upload_time": db_file.upload_time})
 
     # Return the updated list of files
     files_in_chat = (
