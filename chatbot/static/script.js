@@ -341,13 +341,24 @@ function uploadFile() {
     const uploadForm = document.getElementById("uploadForm");
     if (!uploadForm) return;
 
-    const formData = new FormData(uploadForm);
-
     if (!currentChatId) {
         alert("Please start a chat before uploading files.");
         return;
     }
+
+    const fileInput = document.getElementById("fileInput");
+    if (!fileInput.files.length) {
+        alert("Please select at least one file to upload.");
+        return;
+    }
+
+    const formData = new FormData();
     formData.append("chat_id", currentChatId);
+
+    // Append each selected file to the FormData
+    for (let i = 0; i < fileInput.files.length; i++) {
+        formData.append("files", fileInput.files[i]);
+    }
 
     fetch("/upload/", {
         method: "POST",
