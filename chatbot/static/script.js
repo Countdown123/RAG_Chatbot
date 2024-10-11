@@ -353,20 +353,26 @@ async function uploadFile() {
     }
 
     // Count the number of files of each type being uploaded
-    let pdfCount = 0;
-    let csvXlsxCount = 0;
+    let uploadingPdfCount = 0;
+    let uploadingCsvXlsxCount = 0;
 
     for (let i = 0; i < fileInput.files.length; i++) {
         const file = fileInput.files[i];
         const extension = file.name.split('.').pop().toLowerCase();
         if (extension === 'pdf') {
-            pdfCount += 1;
+            uploadingPdfCount += 1;
         } else if (['csv', 'xlsx', 'xls'].includes(extension)) {
-            csvXlsxCount += 1;
+            uploadingCsvXlsxCount += 1;
         } else {
             alert(`Unsupported file type: ${extension}`);
             return;
         }
+    }
+
+    // Enforce that the user can only upload PDF files or CSV/XLSX files, not both
+    if (uploadingPdfCount > 0 && uploadingCsvXlsxCount > 0) {
+        alert("You can only upload PDF files or a single CSV/XLSX file per chat, not both.");
+        return;
     }
 
     try {
@@ -405,13 +411,26 @@ async function uploadFile() {
                 }
             });
 
-            // Check if adding the new files would exceed the limits
-            if ((existingPdfCount + pdfCount) > 5) {
+            // Enforce the new constraints
+            // If there is at least one CSV/XLSX file, prevent uploading any new files
+            if (existingCsvXlsxCount > 0) {
+                alert("You cannot upload additional files when a CSV/XLSX file is already uploaded in this chat.");
+                return;
+            }
+
+            // If there is at least one PDF file, prevent uploading any CSV/XLSX files
+            if (existingPdfCount > 0 && uploadingCsvXlsxCount > 0) {
+                alert("You cannot upload a CSV/XLSX file when PDF files are already uploaded in this chat.");
+                return;
+            }
+
+            // Enforce the limits
+            if ((existingPdfCount + uploadingPdfCount) > 5) {
                 alert("You can upload a maximum of 5 PDF files per chat.");
                 return;
             }
 
-            if ((existingCsvXlsxCount + csvXlsxCount) > 1) {
+            if ((existingCsvXlsxCount + uploadingCsvXlsxCount) > 1) {
                 alert("You can upload a maximum of 1 CSV/XLSX file per chat.");
                 return;
             }
