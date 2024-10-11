@@ -343,7 +343,6 @@ function uploadFile() {
 
     const formData = new FormData(uploadForm);
 
-    // Include the current chat ID in the upload request
     if (!currentChatId) {
         alert("Please start a chat before uploading files.");
         return;
@@ -354,7 +353,6 @@ function uploadFile() {
         method: "POST",
         headers: { 
             "Authorization": `Bearer ${accessToken}`
-            // Note: Do not set 'Content-Type' header when sending FormData
         },
         body: formData,
     })
@@ -362,20 +360,19 @@ function uploadFile() {
         .catch(error => console.error("File upload error:", error));
 }
 
-// Handle the file upload response
+// 파일 업로드 후 처리 함수 수정 (메타데이터 표시 제거)
 function handleFileUploadResponse(response) {
     if (response.status === 401) {
         alert("Session expired. Please log in again.");
         localStorage.removeItem("accessToken");
         redirectToLogin();
+        return;
     }
     return response.json().then((data) => {
-        console.log("Upload response data:", data); // Debugging
+        console.log("Upload response data:", data);
         if (data.fileList) {
             updateFileListDisplay(data.fileList);
-            // Optionally, display a success message
             alert("File uploaded successfully!");
-            // Clear the upload form
             document.getElementById("uploadForm").reset();
         } else if (data.detail) {
             console.error("Error:", data.detail);
@@ -386,6 +383,7 @@ function handleFileUploadResponse(response) {
         }
     });
 }
+
 
 // Fetch the list of uploaded files for the current chat
 function fetchFileList(chatId = null) {
@@ -427,6 +425,7 @@ function fetchFileList(chatId = null) {
 
 // Update the file list display
 function updateFileListDisplay(fileList) {
+    console.log("Updating file list display:", fileList);
     const fileListContainer = document.getElementById("fileList");
     if (!fileListContainer) return;
 
@@ -448,18 +447,27 @@ function updateFileListDisplay(fileList) {
     document.getElementById("fileListContainer").style.display = "block";  
 }
 
-// Create a list item for each file
+// 파일 리스트 아이템 생성 함수 수정
 function createFileListItem(file) {
     const listItem = document.createElement("li");
     listItem.textContent = `${file.filename} (Uploaded on ${file.upload_time})`;
     listItem.style.cursor = 'pointer';
     listItem.onclick = () => fetchFileData(file.id, file.filename);
+    return listItem;
+}
+
+
+// 파일 리스트 아이템 생성 함수 수정
+function createFileListItem(file) {
+    const listItem = document.createElement("li");
+    listItem.textContent = `${file.filename} (Uploaded on ${file.upload_time})`;
+    listItem.style.cursor = 'pointer';
 
     // PDF 파일일 경우 클릭 시 메타데이터 조회
     if (file.filename.endsWith(".pdf")) {
         listItem.onclick = () => fetchAndShowMetadata(file.id, file.filename);
     } else {
-        listItem.onclick = () => fetchFileData(file.id, file.filename); // 기존 파일 데이터 조회 함수
+        listItem.onclick = () => fetchFileData(file.id, file.filename);
     }
 
     return listItem;
@@ -469,12 +477,10 @@ function createFileListItem(file) {
 function fetchAndShowMetadata(fileId, filename) {
     const accessToken = localStorage.getItem("accessToken");
 
-    console.log("Fetching metadata for fileId:", fileId); // fileId 출력 확인
+    console.log("Fetching metadata for fileId:", fileId);
 
-    // 메타데이터 테이블 초기화
     clearMetadataTable();
 
-    // 서버에서 메타데이터 가져오기
     fetch(`/metadata/${fileId}`, {
         method: "GET",
         headers: {
@@ -495,7 +501,7 @@ function fetchAndShowMetadata(fileId, filename) {
         })
         .then(data => {
             if (data.metadata) {
-                showMetadataTable(data.metadata);  // 메타데이터 테이블로 표시
+                showMetadataTable(data.metadata);
             } else {
                 alert("No metadata found for this file.");
             }
@@ -506,10 +512,11 @@ function fetchAndShowMetadata(fileId, filename) {
         });
 }
 
-
 // Fetch file data when a file is clicked
 function fetchFileData(fileId, filename) {
     const accessToken = localStorage.getItem("accessToken");
+    console.log(`Fetching data for file: ${filename} (ID: ${fileId})`);
+    
     fetch(`/file/${fileId}`, {
         method: "GET",
         headers: {
@@ -517,6 +524,7 @@ function fetchFileData(fileId, filename) {
         },
     })
         .then(response => {
+            console.log(`Response status: ${response.status}`);
             if (response.status === 401) {
                 alert("Session expired. Please log in again.");
                 localStorage.removeItem("accessToken");
@@ -524,22 +532,29 @@ function fetchFileData(fileId, filename) {
                 throw new Error("Unauthorized");
             }
             if (!response.ok) {
-                throw new Error("Failed to fetch file data.");
+                return response.text().then(text => {
+                    throw new Error(`Failed to fetch file data: ${text}`);
+                });
             }
             return response.json();
         })
         .then(data => {
+            console.log("Received data:", data);
             if (data.columns && data.data) {
                 displayTable(data.columns, data.data, filename);
-            } else if (data.message) {
-                alert(data.message);
+            } else if (data.metadata) {
+                showMetadataTable(data.metadata);
             } else {
                 alert("An error occurred while retrieving the file data.");
             }
         })
         .catch(error => {
             console.error("Error fetching file data:", error);
-            alert("Error fetching file data. Please try again.");
+            if (error.message.includes("Metadata not found")) {
+                alert("Metadata is being generated for this file. Please try again in a few moments.");
+            } else {
+                alert(`Error fetching file data: ${error.message}`);
+            }
         });
 }
 
@@ -710,55 +725,20 @@ function displayChatFiles(files) {
     document.getElementById("fileListContainer").style.display = "block";  
 }
 
-// 파일 업로드 후 메타데이터 테이블 표시
-document.getElementById('uploadForm').addEventListener('submit', async (event) => {
-    event.preventDefault();
-
-    const fileInput = document.getElementById('fileInput');
-    const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
-    formData.append('chat_id', currentChatId);  
-
-    // JWT 토큰 가져오기
-    const accessToken = localStorage.getItem('accessToken');
-
-    const response = await fetch('/upload_pdf/', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`, 
-        },
-        body: formData
-    });
-
-    const data = await response.json();
-
-    if (response.ok) {
-        // 기존 메타데이터 초기화
-        clearMetadataTable();  // 기존 메타데이터 초기화 함수 호출
-    
-        // 새로운 메타데이터 바로 표시
-        showMetadataTable(data.metadata);  // 동적으로 받은 메타데이터 표시
-    } else {
-        console.error("Error uploading PDF:", data);
-        alert(`Error: ${data.detail}`);
-    }
-    
-});
-
 // 메타데이터 테이블 초기화 함수
 function clearMetadataTable() {
     const existingTable = document.getElementById("metadataTable");
     if (existingTable) {
-        existingTable.remove();  // 기존 테이블을 제거
+        existingTable.remove();
     }
 
-    // 기존 모달 제거
     const existingModal = document.querySelector('.modal');
     if (existingModal) {
-        existingModal.remove();  
+        existingModal.remove();
     }
 }
 
+// 메타데이터 테이블 표시 함수
 function showMetadataTable(metadata) {
     const popup = document.createElement("div");
     popup.classList.add("modal");
@@ -773,7 +753,7 @@ function showMetadataTable(metadata) {
     };
 
     const tableElement = document.createElement("table");
-    tableElement.id = "metadataTable";  // 새 메타데이터 테이블
+    tableElement.id = "metadataTable";
 
     const thead = document.createElement("thead");
     const headerRow = document.createElement("tr");
@@ -788,7 +768,6 @@ function showMetadataTable(metadata) {
 
     const tbody = document.createElement("tbody");
 
-    // 메타데이터를 테이블에 추가
     for (const key in metadata) {
         if (metadata.hasOwnProperty(key)) {
             const row = document.createElement("tr");
@@ -798,7 +777,7 @@ function showMetadataTable(metadata) {
 
             const tdValue = document.createElement("td");
             if (Array.isArray(metadata[key])) {
-                tdValue.innerHTML = metadata[key].join("<br>");  
+                tdValue.innerHTML = metadata[key].join("<br>");
             } else if (typeof metadata[key] === "object") {
                 tdValue.innerHTML = JSON.stringify(metadata[key], null, 2).replace(/\n/g, "<br>").replace(/ /g, "&nbsp;");
             } else {
@@ -818,114 +797,4 @@ function showMetadataTable(metadata) {
     document.body.appendChild(popup);
 
     popup.style.display = 'block';
-}
-
-var fileNo = 0;
-var filesArr = [];
-
-/* 첨부파일 추가 */
-function addFile(obj) {
-    var maxPdfFileCnt = 5;  // PDF 파일 최대 개수
-    var attPdfFileCnt = filesArr.filter(file => file.type === 'application/pdf').length; // 기존 추가된 PDF 파일 개수
-    var remainPdfFileCnt = maxPdfFileCnt - attPdfFileCnt;  // 추가로 첨부가능한 PDF 파일 개수
-    var curFileCnt = obj.files.length;  // 현재 선택된 첨부파일 개수
-
-    for (var i = 0; i < curFileCnt; i++) {
-        const file = obj.files[i];
-
-        // 첨부파일 검증
-        if (validation(file)) {
-            if (file.type === 'application/pdf') {
-                if (attPdfFileCnt >= maxPdfFileCnt) {
-                    alert("PDF 파일은 최대 " + maxPdfFileCnt + "개 까지 첨부 가능합니다.");
-                    break;
-                }
-                attPdfFileCnt++;
-            } else if (file.type === 'text/csv' || file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
-                if (filesArr.some(f => f.type === 'text/csv' || f.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
-                    alert("CSV 또는 XLSX 파일은 하나만 첨부 가능합니다.");
-                    continue;
-                }
-            } else {
-                alert("허용되지 않은 파일 형식입니다.");
-                continue;
-            }
-
-            // 파일 배열에 담기
-            var reader = new FileReader();
-            reader.onload = function () {
-                filesArr.push(file);
-            };
-            reader.readAsDataURL(file);
-
-            // 목록 추가
-            let htmlData = '';
-            htmlData += '<div id="file' + fileNo + '" class="filebox">';
-            htmlData += '   <p class="name">' + file.name + '</p>';
-            htmlData += '   <a class="delete" onclick="deleteFile(' + fileNo + ');"><i class="far fa-minus-square"></i></a>';
-            htmlData += '</div>';
-            $('.file-list').append(htmlData);
-            fileNo++;
-        }
-    }
-
-    // 초기화
-    document.querySelector("input[type=file]").value = "";
-}
-
-/* 첨부파일 검증 */
-function validation(file) {
-    const fileTypes = ['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
-    if (file.name.length > 100) {
-        alert("파일명이 100자 이상인 파일은 제외되었습니다.");
-        return false;
-    } else if (file.size > (100 * 1024 * 1024)) {
-        alert("최대 파일 용량인 100MB를 초과한 파일은 제외되었습니다.");
-        return false;
-    } else if (file.name.lastIndexOf('.') == -1) {
-        alert("확장자가 없는 파일은 제외되었습니다.");
-        return false;
-    } else if (!fileTypes.includes(file.type)) {
-        alert("첨부가 불가능한 파일은 제외되었습니다.");
-        return false;
-    } else {
-        return true;
-    }
-}
-
-/* 첨부파일 삭제 */
-function deleteFile(num) {
-    document.querySelector("#file" + num).remove();
-    filesArr[num].is_delete = true;
-}
-
-/* 폼 전송 */
-function submitForm() {
-    // 폼데이터 담기
-    var form = document.querySelector("form");
-    var formData = new FormData(form);
-    for (var i = 0; i < filesArr.length; i++) {
-        // 삭제되지 않은 파일만 폼데이터에 담기
-        if (!filesArr[i].is_delete) {
-            formData.append("attach_file", filesArr[i]);
-        }
-    }
-
-    $.ajax({
-        method: 'POST',
-        url: '/register',
-        dataType: 'json',
-        data: formData,
-        async: true,
-        timeout: 30000,
-        cache: false,
-        headers: { 'cache-control': 'no-cache', 'pragma': 'no-cache' },
-        success: function () {
-            alert("파일업로드 성공");
-        },
-        error: function (xhr, desc, err) {
-            alert('에러가 발생 하였습니다.');
-            return;
-        }
-    });
 }

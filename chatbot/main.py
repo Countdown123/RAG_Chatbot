@@ -350,12 +350,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             for f in uploaded_files
                             if f.filename.split(".")[-1].lower() in valid_extensions
                         ]
-                        if not data_files:
-                            error_msg = "No data files uploaded. Please upload a csv, xlsx, or xls file."
-                            await websocket.send_text(error_msg)
-                            logger.error(error_msg)
-                            continue
-                        else:
+                        if data_files:
                             # Initialize the agent
                             llm = ChatOpenAI(
                                 model_name="gpt-3.5-turbo",
@@ -390,11 +385,23 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "timestamp": datetime.now().isoformat(),
                             }
                             messages.append(received_message)
-                            # Update the database
-                            db_chat.messages = json.dumps(messages)
-                            db.commit()
-                            # Save the updated chat history to JSON file
-                            save_chat_history_to_file(user.id, chat_id, messages)
+                        else:
+                            # No data files uploaded; handle chat without agent
+                            response = "You have no data files uploaded. You can still chat, but advanced functionalities are limited."
+                            await websocket.send_text(response)
+                            # Append the system response
+                            received_message = {
+                                "type": "received",
+                                "content": response,
+                                "timestamp": datetime.now().isoformat(),
+                            }
+                            messages.append(received_message)
+
+                        # Update the database
+                        db_chat.messages = json.dumps(messages)
+                        db.commit()
+                        # Save the updated chat history to JSON file
+                        save_chat_history_to_file(user.id, chat_id, messages)
                     else:
                         error_msg = "Error: Chat session not found."
                         await websocket.send_text(error_msg)
@@ -538,32 +545,54 @@ async def get_file_data(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Endpoint to retrieve the contents of an uploaded file.
-    For .xlsx and .csv files, returns data as JSON.
-    For .pdf files, returns a message.
-    """
+    logger.info(
+        f"Fetching file data for file_id: {file_id}, user_id: {current_user.id}"
+    )
+
     db_file = (
         db.query(FileModel)
         .filter(FileModel.id == file_id, FileModel.user_id == current_user.id)
         .first()
     )
+
     if not db_file:
+        logger.warning(f"File not found: file_id={file_id}, user_id={current_user.id}")
         raise HTTPException(status_code=404, detail="File not found")
+
+    logger.info(f"File found: {db_file.filename}")
 
     filename = db_file.filename
     filepath = db_file.filepath
     extension = filename.split(".")[-1].lower()
+    if extension == "pdf":
+        metadata_record = (
+            db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
+        )
+        if not metadata_record:
+            logger.warning(
+                f"Metadata not found for file ID: {file_id}. Generating new metadata."
+            )
+            # 메타데이터 생성 로직
+            metadata = generate_pdf_metadata(filepath)  # 이 함수는 아래에서 정의합니다
 
-    if extension in ["xlsx", "xls", "csv"]:
+            # 새로 생성된 메타데이터 저장
+            new_metadata = FileMetadata(
+                file_id=db_file.id,
+                chat_id=db_file.chat_id,
+                file_metadata=json.dumps(metadata),
+            )
+            db.add(new_metadata)
+            db.commit()
+        else:
+            metadata = json.loads(metadata_record.file_metadata)
+
+        return {"metadata": metadata}
+    elif extension in ["xlsx", "xls", "csv"]:
         try:
             if extension in ["xlsx", "xls"]:
                 df = pd.read_excel(filepath)
             else:  # csv
                 df = pd.read_csv(filepath)
-
-            # Log the DataFrame shape for debugging
-            logger.info(f"Processing file '{filename}' with shape {df.shape}")
 
             # Replace infinite values with NaN
             df.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -575,21 +604,68 @@ async def get_file_data(
             data = df.to_dict(orient="records")
             columns = df.columns.tolist()
 
-            # Log a snippet of the data for debugging
-            logger.info(f"First row of data: {data[0] if data else 'No data'}")
-
             return JSONResponse(content={"columns": columns, "data": data})
         except Exception as e:
-            logger.error(f"Error processing file '{filename}': {e}")  # Logging
+            logger.error(f"Error processing file '{filename}': {e}")
             raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
     elif extension == "pdf":
+        # PDF 파일에 대한 메타데이터 반환
         metadata_record = (
             db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
         )
+        if not metadata_record:
+            raise HTTPException(
+                status_code=404, detail=f"Metadata not found for file ID: {file_id}"
+            )
         return {"metadata": json.loads(metadata_record.file_metadata)}
-        # return {"message": "PDF file viewing is not supported in this application."}
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type")
+
+
+# PDF 메타데이터 생성 함수
+def generate_pdf_metadata(filepath):
+    try:
+        pdf_loader = PyPDFLoader(filepath)
+        docs = pdf_loader.load()
+
+        full_text = "\n".join([doc.page_content for doc in docs])
+        llm = ChatOpenAI(model="gpt-3.5-turbo")  # ChatGPT 3.5 사용 (더 빠르고 저렴)
+
+        prompt = f"""
+        Analyze the following PDF content and extract the metadata with the following structure:
+        
+        - Document Title: Title of the document
+        - Authors: List of authors (if available)
+        - Section Headings: Key section headings from the document
+        - Key Topics: Major topics discussed in the document
+        - Notable Data Points: Any significant statistics, numbers, or facts in the text
+        - Summary: Brief summary of the document content
+
+        Use the following PDF text to extract the metadata:
+
+        PDF Text: {full_text[:1500]}  # 처음 1500자만 사용
+
+        Return the metadata as a structured key-value format.
+        """
+
+        metadata_response = llm.invoke(prompt)
+
+        metadata = {}
+        if metadata_response and hasattr(metadata_response, "content"):
+            metadata_text = metadata_response.content
+
+            lines = metadata_text.split("\n")
+            for line in lines:
+                if ": " in line:
+                    key, value = line.split(": ", 1)
+                    metadata[key.strip()] = value.strip()
+        else:
+            metadata = {"Error": "Failed to generate metadata"}
+
+        return metadata
+    except Exception as e:
+        logger.error(f"Error generating PDF metadata: {e}")
+        return {"Error": str(e)}
 
 
 @app.get("/history/{chat_id}")
@@ -627,6 +703,7 @@ async def get_chat_history(
     else:
         raise HTTPException(status_code=404, detail="Chat not found")
 
+
 @app.post("/upload_pdf/")
 async def upload_pdf(
     file: UploadFile = File(...),
@@ -634,78 +711,98 @@ async def upload_pdf(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # 파일 저장 경로 설정
     pdf_path = f"uploads/{file.filename}"
     with open(pdf_path, "wb") as f:
         f.write(await file.read())
 
-    # 새로운 파일에 대한 파일 정보를 데이터베이스에서 찾기
-    db_file = db.query(FileModel).filter(FileModel.chat_id == chat_id, FileModel.filename == file.filename).first()
+    db_file = (
+        db.query(FileModel)
+        .filter(FileModel.chat_id == chat_id, FileModel.filename == file.filename)
+        .first()
+    )
 
     if db_file:
-        # 메타데이터가 이미 저장되어 있는지 확인
-        existing_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
-        if existing_metadata:
-            # 이미 메타데이터가 존재하면 재생성하지 않고 반환
-            return {"metadata": json.loads(existing_metadata.file_metadata)}
-
-        # GPT 모델을 사용하여 메타데이터 생성
-        pdf_loader = PyPDFLoader(pdf_path)
-        docs = pdf_loader.load()
-
-        full_text = "\n".join([doc.page_content for doc in docs])  # 전체 PDF 내용을 하나로 결합
-        llm = ChatOpenAI(model="gpt-4")
-
-        prompt = f"""
-        Analyze the following PDF content and extract the metadata with the following structure:
-        
-        - Document Title: Title of the document
-        - Authors: List of authors
-        - Section Headings: Key section headings from the document
-        - Key Topics: Major topics discussed in the document
-        - Notable Data Points: Any significant statistics, numbers, or facts in the text
-        - Conclusion: Summary of the conclusion, if available
-
-        Use the following PDF text to extract the metadata:
-
-        PDF Text: {full_text[:1000]}
-
-        Return the metadata as a structured key-value format.
-        """
-
-        # GPT 모델을 사용하여 메타데이터 생성
-        metadata_response = llm.invoke(prompt)
-
-        # 응답을 파싱하여 메타데이터를 key-value 형식으로 변환
-        metadata = {}
-        if metadata_response and hasattr(metadata_response, "content"):
-            metadata_text = metadata_response.content
-
-            lines = metadata_text.split("\n")
-            for line in lines:
-                if ": " in line:
-                    key, value = line.split(": ", 1)
-                    metadata[key.strip()] = value.strip()
-        else:
-            metadata = {
-                "Error": (
-                    "Failed to parse metadata from GPT response"
-                    if metadata_response
-                    else "No metadata generated"
-                )
-            }
-
-        # 메타데이터를 DB에 저장
-        db_metadata = FileMetadata(
-            chat_id=chat_id,
-            file_id=db_file.id,  # 고유한 파일 ID 사용
-            file_metadata=json.dumps(metadata)  # 메타데이터를 JSON으로 저장
+        existing_metadata = (
+            db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
         )
-        db.add(db_metadata)
-        db.commit()
+        if not existing_metadata:
+            pdf_loader = PyPDFLoader(pdf_path)
+            docs = pdf_loader.load()
 
-    # key-value 쌍으로 파싱된 메타데이터 반환
-    return {"metadata": metadata}
+            full_text = "\n".join([doc.page_content for doc in docs])
+            llm = ChatOpenAI(model="gpt-4")
+
+            prompt = f"""
+            Analyze the following PDF content and extract the metadata with the following structure:
+            
+            - Document Title: Title of the document
+            - Authors: List of authors
+            - Section Headings: Key section headings from the document
+            - Key Topics: Major topics discussed in the document
+            - Notable Data Points: Any significant statistics, numbers, or facts in the text
+            - Conclusion: Summary of the conclusion, if available
+
+            Use the following PDF text to extract the metadata:
+
+            PDF Text: {full_text[:1000]}
+
+            Return the metadata as a structured key-value format.
+            """
+
+            metadata_response = llm.invoke(prompt)
+
+            metadata = {}
+            if metadata_response and hasattr(metadata_response, "content"):
+                metadata_text = metadata_response.content
+
+                lines = metadata_text.split("\n")
+                for line in lines:
+                    if ": " in line:
+                        key, value = line.split(": ", 1)
+                        metadata[key.strip()] = value.strip()
+            else:
+                metadata = {
+                    "Error": (
+                        "Failed to parse metadata from GPT response"
+                        if metadata_response
+                        else "No metadata generated"
+                    )
+                }
+
+            db_metadata = FileMetadata(
+                chat_id=chat_id, file_id=db_file.id, file_metadata=json.dumps(metadata)
+            )
+            db.add(db_metadata)
+            db.commit()
+
+    files = (
+        db.query(FileModel)
+        .filter(FileModel.user_id == current_user.id, FileModel.chat_id == chat_id)
+        .all()
+    )
+    file_list = [
+        {"id": f.id, "filename": f.filename, "upload_time": f.upload_time}
+        for f in files
+    ]
+    return {"fileList": file_list}
+
+
+@app.get("/metadata/{file_id}")
+async def get_metadata(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    metadata_record = (
+        db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+    )
+
+    if not metadata_record:
+        raise HTTPException(
+            status_code=404, detail=f"Metadata not found for file ID: {file_id}"
+        )
+
+    return {"metadata": json.loads(metadata_record.file_metadata)}
 
 
 @app.get("/metadata/{file_id}")
@@ -715,12 +812,17 @@ async def get_metadata(
     db: Session = Depends(get_db),
 ):
     # 파일 ID로 메타데이터 조회
-    metadata_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+    metadata_record = (
+        db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+    )
 
     if not metadata_record:
-        raise HTTPException(status_code=404, detail=f"Metadata not found for file ID: {file_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Metadata not found for file ID: {file_id}"
+        )
 
     return {"metadata": json.loads(metadata_record.file_metadata)}
+
 
 # Serve HTML pages
 @app.get("/", response_class=HTMLResponse)
