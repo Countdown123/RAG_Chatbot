@@ -564,6 +564,7 @@ async def get_file_data(
     filename = db_file.filename
     filepath = db_file.filepath
     extension = filename.split(".")[-1].lower()
+
     if extension == "pdf":
         metadata_record = (
             db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
@@ -572,10 +573,8 @@ async def get_file_data(
             logger.warning(
                 f"Metadata not found for file ID: {file_id}. Generating new metadata."
             )
-            # 메타데이터 생성 로직
-            metadata = generate_pdf_metadata(filepath)  # 이 함수는 아래에서 정의합니다
+            metadata = generate_pdf_metadata(filepath)
 
-            # 새로 생성된 메타데이터 저장
             new_metadata = FileMetadata(
                 file_id=db_file.id,
                 chat_id=db_file.chat_id,
@@ -583,8 +582,10 @@ async def get_file_data(
             )
             db.add(new_metadata)
             db.commit()
+            logger.info(f"Generated and saved new metadata for file ID: {file_id}")
         else:
             metadata = json.loads(metadata_record.file_metadata)
+            raise HTTPException(status_code=400, detail="Unsupported file type")
 
         return {"metadata": metadata}
     elif extension in ["xlsx", "xls", "csv"]:
@@ -793,14 +794,42 @@ async def get_metadata(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    logger.info(f"Fetching metadata for file_id: {file_id}, user_id: {current_user.id}")
+
+    db_file = (
+        db.query(FileModel)
+        .filter(FileModel.id == file_id, FileModel.user_id == current_user.id)
+        .first()
+    )
+
+    if not db_file:
+        logger.warning(f"File not found: file_id={file_id}, user_id={current_user.id}")
+        raise HTTPException(status_code=404, detail="File not found")
+
     metadata_record = (
         db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
     )
 
     if not metadata_record:
-        raise HTTPException(
-            status_code=404, detail=f"Metadata not found for file ID: {file_id}"
+        logger.warning(
+            f"Metadata not found for file ID: {file_id}. Generating new metadata."
         )
+        if db_file.filename.lower().endswith(".pdf"):
+            metadata = generate_pdf_metadata(db_file.filepath)
+            new_metadata = FileMetadata(
+                file_id=file_id,
+                chat_id=db_file.chat_id,
+                file_metadata=json.dumps(metadata),
+            )
+            db.add(new_metadata)
+            db.commit()
+            logger.info(f"Generated and saved new metadata for file ID: {file_id}")
+            return {"metadata": metadata}
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Metadata generation is only supported for PDF files",
+            )
 
     return {"metadata": json.loads(metadata_record.file_metadata)}
 

@@ -452,19 +452,8 @@ function createFileListItem(file) {
     const listItem = document.createElement("li");
     listItem.textContent = `${file.filename} (Uploaded on ${file.upload_time})`;
     listItem.style.cursor = 'pointer';
-    listItem.onclick = () => fetchFileData(file.id, file.filename);
-    return listItem;
-}
 
-
-// 파일 리스트 아이템 생성 함수 수정
-function createFileListItem(file) {
-    const listItem = document.createElement("li");
-    listItem.textContent = `${file.filename} (Uploaded on ${file.upload_time})`;
-    listItem.style.cursor = 'pointer';
-
-    // PDF 파일일 경우 클릭 시 메타데이터 조회
-    if (file.filename.endsWith(".pdf")) {
+    if (file.filename.toLowerCase().endsWith('.pdf')) {
         listItem.onclick = () => fetchAndShowMetadata(file.id, file.filename);
     } else {
         listItem.onclick = () => fetchFileData(file.id, file.filename);
@@ -480,6 +469,7 @@ function fetchAndShowMetadata(fileId, filename) {
     console.log("Fetching metadata for fileId:", fileId);
 
     clearMetadataTable();
+    showLoadingScreen();  // Show loading screen before fetch
 
     fetch(`/metadata/${fileId}`, {
         method: "GET",
@@ -489,13 +479,16 @@ function fetchAndShowMetadata(fileId, filename) {
     })
         .then(response => {
             if (response.status === 401) {
+                hideLoadingScreen();
                 alert("Session expired. Please log in again.");
                 localStorage.removeItem("accessToken");
                 redirectToLogin();
                 throw new Error("Unauthorized");
             }
             if (!response.ok) {
-                throw new Error("Failed to fetch metadata.");
+                return response.text().then(text => {
+                    throw new Error(`Failed to fetch metadata: ${text}`);
+                });
             }
             return response.json();
         })
@@ -509,6 +502,9 @@ function fetchAndShowMetadata(fileId, filename) {
         .catch(error => {
             console.error("Error fetching metadata:", error);
             alert("Error fetching metadata. Please try again.");
+        })
+        .finally(() => {
+            hideLoadingScreen();  // Always hide loading screen when done
         });
 }
 
@@ -517,6 +513,8 @@ function fetchFileData(fileId, filename) {
     const accessToken = localStorage.getItem("accessToken");
     console.log(`Fetching data for file: ${filename} (ID: ${fileId})`);
     
+    showLoadingScreen("Fetching file data...");  // Show loading screen
+
     fetch(`/file/${fileId}`, {
         method: "GET",
         headers: {
@@ -526,6 +524,7 @@ function fetchFileData(fileId, filename) {
         .then(response => {
             console.log(`Response status: ${response.status}`);
             if (response.status === 401) {
+                hideLoadingScreen();
                 alert("Session expired. Please log in again.");
                 localStorage.removeItem("accessToken");
                 redirectToLogin();
@@ -539,6 +538,7 @@ function fetchFileData(fileId, filename) {
             return response.json();
         })
         .then(data => {
+            hideLoadingScreen();  // Hide loading screen
             console.log("Received data:", data);
             if (data.columns && data.data) {
                 displayTable(data.columns, data.data, filename);
@@ -549,6 +549,7 @@ function fetchFileData(fileId, filename) {
             }
         })
         .catch(error => {
+            hideLoadingScreen();  // Hide loading screen
             console.error("Error fetching file data:", error);
             if (error.message.includes("Metadata not found")) {
                 alert("Metadata is being generated for this file. Please try again in a few moments.");
@@ -798,3 +799,43 @@ function showMetadataTable(metadata) {
 
     popup.style.display = 'block';
 }
+
+function showLoadingScreen() {
+    hideLoadingScreen();  // Remove any existing loading screen
+    
+    const loadingScreen = document.createElement("div");
+    loadingScreen.className = "loading-screen";
+    loadingScreen.innerHTML = `<div class="spinner"></div>`;
+    document.body.appendChild(loadingScreen);
+    console.log("Loading screen shown");
+    
+    // Force a reflow to ensure the loading screen is rendered
+    void loadingScreen.offsetWidth;
+}
+
+function hideLoadingScreen() {
+    const loadingScreen = document.querySelector(".loading-screen");
+    if (loadingScreen) {
+        loadingScreen.style.opacity = '0';
+        setTimeout(() => {
+            loadingScreen.remove();
+            console.log("Loading screen hidden");
+        }, 300);  // Delay removal to allow for fade-out effect
+    }
+}
+
+function checkLoadingScreen() {
+    setTimeout(() => {
+        const loadingScreen = document.querySelector('.loading-screen');
+        if (!loadingScreen) {
+            console.error('Loading screen not found in DOM');
+        } else {
+            console.log('Loading screen confirmed in DOM');
+            console.log('Loading screen style:', window.getComputedStyle(loadingScreen));
+        }
+    }, 100);
+}
+
+// Call this after showLoadingScreen() in fetchAndShowMetadata
+// showLoadingScreen();
+// checkLoadingScreen();
