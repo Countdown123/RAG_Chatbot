@@ -246,6 +246,20 @@ button:hover {
   background-color: #ff1a1a !important;
 }
 
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+table, th, td {
+  border: 1px solid black;
+}
+th, td {
+  padding: 10px;
+  text-align: left;
+}
+
+
 .loading-screen {
     position: fixed;
     top: 0;
