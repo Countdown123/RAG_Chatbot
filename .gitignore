@@ -5,7 +5,10 @@ __pycache__/
 
 
 # venv
-chatbot/example
+chatbot/example/
+chatbot/upload/
+*.db
+chatbot/*.db
 
 # C extensions
 *.so
