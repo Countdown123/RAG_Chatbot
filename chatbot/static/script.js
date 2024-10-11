@@ -837,5 +837,5 @@ function checkLoadingScreen() {
 }
 
 // Call this after showLoadingScreen() in fetchAndShowMetadata
-showLoadingScreen();
-checkLoadingScreen();
+// showLoadingScreen();
+// checkLoadingScreen();
