@@ -336,7 +336,7 @@ function setupUploadForm() {
 }
 
 // Handle file upload and associate it with the current chat
-function uploadFile() {
+async function uploadFile() {
     const accessToken = localStorage.getItem("accessToken");
     const uploadForm = document.getElementById("uploadForm");
     if (!uploadForm) return;
@@ -352,33 +352,102 @@ function uploadFile() {
         return;
     }
 
-    const formData = new FormData();
-    formData.append("chat_id", currentChatId);
+    // Count the number of files of each type being uploaded
+    let pdfCount = 0;
+    let csvXlsxCount = 0;
 
-    // Append each selected file to the FormData
     for (let i = 0; i < fileInput.files.length; i++) {
-        formData.append("files", fileInput.files[i]);
+        const file = fileInput.files[i];
+        const extension = file.name.split('.').pop().toLowerCase();
+        if (extension === 'pdf') {
+            pdfCount += 1;
+        } else if (['csv', 'xlsx', 'xls'].includes(extension)) {
+            csvXlsxCount += 1;
+        } else {
+            alert(`Unsupported file type: ${extension}`);
+            return;
+        }
     }
 
-    // Show the loading screen
-    showLoadingScreen();
-
-    fetch("/upload/", {
-        method: "POST",
-        headers: { 
-            "Authorization": `Bearer ${accessToken}`
-        },
-        body: formData,
-    })
-        .then(response => handleFileUploadResponse(response))
-        .catch(error => {
-            console.error("File upload error:", error);
-            alert("An error occurred during file upload.");
-        })
-        .finally(() => {
-            // Hide the loading screen regardless of success or failure
-            hideLoadingScreen();
+    try {
+        // Fetch the existing files for the current chat
+        const response = await fetch(`/files/?chat_id=${currentChatId}`, {
+            method: "GET",
+            headers: {
+                "Authorization": `Bearer ${accessToken}`
+            },
         });
+
+        if (response.status === 401) {
+            alert("Session expired. Please log in again.");
+            localStorage.removeItem("accessToken");
+            redirectToLogin();
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error("Error fetching existing files.");
+        }
+
+        const data = await response.json();
+
+        if (data.fileList) {
+            // Count existing files
+            let existingPdfCount = 0;
+            let existingCsvXlsxCount = 0;
+
+            data.fileList.forEach(file => {
+                const extension = file.filename.split('.').pop().toLowerCase();
+                if (extension === 'pdf') {
+                    existingPdfCount += 1;
+                } else if (['csv', 'xlsx', 'xls'].includes(extension)) {
+                    existingCsvXlsxCount += 1;
+                }
+            });
+
+            // Check if adding the new files would exceed the limits
+            if ((existingPdfCount + pdfCount) > 5) {
+                alert("You can upload a maximum of 5 PDF files per chat.");
+                return;
+            }
+
+            if ((existingCsvXlsxCount + csvXlsxCount) > 1) {
+                alert("You can upload a maximum of 1 CSV/XLSX file per chat.");
+                return;
+            }
+
+            // Proceed with the upload
+            const formData = new FormData();
+            formData.append("chat_id", currentChatId);
+
+            // Append each selected file to the FormData
+            for (let i = 0; i < fileInput.files.length; i++) {
+                formData.append("files", fileInput.files[i]);
+            }
+
+            // Show the loading screen
+            showLoadingScreen();
+
+            const uploadResponse = await fetch("/upload/", {
+                method: "POST",
+                headers: { 
+                    "Authorization": `Bearer ${accessToken}`
+                },
+                body: formData,
+            });
+
+            handleFileUploadResponse(uploadResponse);
+
+        } else {
+            alert("Error fetching existing files. Please try again.");
+        }
+    } catch (error) {
+        console.error("Error in uploadFile:", error);
+        alert("An error occurred. Please try again.");
+    } finally {
+        // Hide the loading screen regardless of success or failure
+        hideLoadingScreen();
+    }
 }
 
 // 파일 업로드 후 처리 함수 수정 (메타데이터 표시 제거)
