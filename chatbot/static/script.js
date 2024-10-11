@@ -360,6 +360,9 @@ function uploadFile() {
         formData.append("files", fileInput.files[i]);
     }
 
+    // Show the loading screen
+    showLoadingScreen();
+
     fetch("/upload/", {
         method: "POST",
         headers: { 
@@ -368,7 +371,14 @@ function uploadFile() {
         body: formData,
     })
         .then(response => handleFileUploadResponse(response))
-        .catch(error => console.error("File upload error:", error));
+        .catch(error => {
+            console.error("File upload error:", error);
+            alert("An error occurred during file upload.");
+        })
+        .finally(() => {
+            // Hide the loading screen regardless of success or failure
+            hideLoadingScreen();
+        });
 }
 
 // 파일 업로드 후 처리 함수 수정 (메타데이터 표시 제거)
@@ -383,7 +393,7 @@ function handleFileUploadResponse(response) {
         console.log("Upload response data:", data);
         if (data.fileList) {
             updateFileListDisplay(data.fileList);
-            alert("File uploaded successfully!");
+            alert("File(s) uploaded successfully!");
             document.getElementById("uploadForm").reset();
         } else if (data.detail) {
             console.error("Error:", data.detail);
@@ -392,6 +402,9 @@ function handleFileUploadResponse(response) {
             console.error("Unexpected response:", data);
             alert("An unexpected error occurred during file upload.");
         }
+    }).catch(error => {
+        console.error("Error parsing upload response:", error);
+        alert("An error occurred while processing the upload response.");
     });
 }
 
