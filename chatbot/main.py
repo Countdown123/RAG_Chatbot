@@ -427,7 +427,7 @@ async def upload_file(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    allowed_extensions = ["xlsx", "xls", "csv", "pdf"]
+    # allowed_extensions = ["xlsx", "xls", "csv", "pdf"]
 
     # Verify that the chat_id exists for the user
     db_chat = (
@@ -459,24 +459,36 @@ async def upload_file(
             existing_csv_xlsx_count += 1
 
     # Count the files being uploaded
-    pdf_count = 0
-    csv_xlsx_count = 0
+    uploading_pdf_count = 0
+    uploading_csv_xlsx_count = 0
 
     for file in files:
         filename = file.filename
         extension = filename.split(".")[-1].lower()
 
         if extension == "pdf":
-            pdf_count += 1
+            uploading_pdf_count += 1
         elif extension in ["xlsx", "xls", "csv"]:
-            csv_xlsx_count += 1
+            uploading_csv_xlsx_count += 1
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {extension}")
 
-    # Check limits
-    if existing_pdf_count + pdf_count > 5:
+    # Enforce that the user can only upload PDF files or CSV/XLSX files, not both
+    if uploading_pdf_count > 0 and uploading_csv_xlsx_count > 0:
+        raise HTTPException(status_code=400, detail="You can only upload PDF files or a single CSV/XLSX file per chat, not both.")
+
+    # Enforce the new constraints
+    if existing_csv_xlsx_count > 0:
+        # If a CSV/XLSX file is already uploaded, prevent uploading any new files
+        raise HTTPException(status_code=400, detail="Cannot upload additional files when a CSV/XLSX file is already uploaded in this chat.")
+    if existing_pdf_count > 0 and uploading_csv_xlsx_count > 0:
+        # If PDF files are already uploaded, prevent uploading CSV/XLSX files
+        raise HTTPException(status_code=400, detail="Cannot upload a CSV/XLSX file when PDF files are already uploaded in this chat.")
+
+    # Enforce the limits
+    if existing_pdf_count + uploading_pdf_count > 5:
         raise HTTPException(status_code=400, detail="You can upload a maximum of 5 PDF files per chat.")
-    if existing_csv_xlsx_count + csv_xlsx_count > 1:
+    if existing_csv_xlsx_count + uploading_csv_xlsx_count > 1:
         raise HTTPException(status_code=400, detail="You can upload a maximum of 1 CSV/XLSX file per chat.")
 
     # Proceed with uploading files
