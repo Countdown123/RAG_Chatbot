@@ -1,4 +1,5 @@
-# 필요한 라이브러리 임포트
+import os
+import re
 import pandas as pd
 import sqlite3
 from langchain_community.chat_models import ChatOpenAI
@@ -15,18 +16,18 @@ from langchain.memory import ConversationBufferMemory
 from langchain_community.callbacks.manager import get_openai_callback
 from deep_translator import GoogleTranslator
 from collections import Counter
-import re
 
 
 class SQLChatbot:
-    def __init__(self, file_path):
+
+    def __init__(self, file_path, sanitized_filename=None):
         self.file_path = file_path
-        self.file_name = self._get_file_name()
+        self.file_name = sanitized_filename or self._get_file_name()
+        self.table_name = self._get_table_name()
         self.model = self._determine_model()
         self.df = self._load_data()
-        self.exception_words = self._extract_exception_words()
         self.conn = self._create_database()
-        self.db = SQLDatabase.from_uri(f"sqlite:///{self.file_name}.db")
+        self.db = self._create_sql_database()
         self.llm = ChatOpenAI(model_name=self.model, temperature=0)
         self.toolkit = SQLDatabaseToolkit(db=self.db, llm=self.llm)
         self.memory = ConversationBufferMemory(
@@ -34,53 +35,96 @@ class SQLChatbot:
         )
         self.prompt = self._create_prompt()
         self.agent_executor = self._initialize_agent_executor()
+        self.exception_words = self._extract_exception_words()
 
     def _get_file_name(self):
-        # 파일 이름만 가져오기
-        return self.file_path.split("\\")[-1].rsplit(".", 1)[0]
+        base_name = os.path.basename(self.file_path)
+        return "".join(e for e in base_name if e.isalnum() or e in [".", "_"])
+
+    def _get_table_name(self):
+        table_name = re.sub(r"\W+", "_", self.file_name)
+        table_name = re.sub(r"^_+|_+$", "", table_name)
+        if table_name[0].isdigit():
+            table_name = "T_" + table_name
+        return table_name
 
     def _determine_model(self):
-        # 파일 형식에 따른 모델 지정
         if self.file_path.endswith(".csv"):
-            return "gpt-3.5-turbo"
+            return "gpt-4o"
         elif self.file_path.endswith(".xls") or self.file_path.endswith(".xlsx"):
-            return "gpt-4-turbo"
+            return "gpt-4o"
         else:
             raise ValueError(
                 "지원되지 않는 파일 형식입니다. CSV, XLS, XLSX 파일만 지원됩니다."
             )
 
     def _load_data(self):
-        # 파일 형식 확인 및 데이터 로드
-        if self.file_path.endswith(".csv"):
-            df = pd.read_csv(self.file_path)
-        elif self.file_path.endswith(".xls") or self.file_path.endswith(".xlsx"):
-            df = pd.read_excel(self.file_path, header=0)
-        else:
-            raise ValueError(
-                "지원되지 않는 파일 형식입니다. CSV, XLS, XLSX 파일만 지원됩니다."
-            )
-        return df
+        try:
+            if self.file_path.endswith(".csv"):
+                encodings = ["utf-8", "cp949", "euc-kr", "iso-8859-1"]
+                for encoding in encodings:
+                    try:
+                        df = pd.read_csv(self.file_path, encoding=encoding)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    raise ValueError(
+                        f"Unable to read the CSV file with any of the attempted encodings: {encodings}"
+                    )
+            elif self.file_path.endswith(".xls") or self.file_path.endswith(".xlsx"):
+                df = pd.read_excel(self.file_path, header=0)
+            else:
+                raise ValueError(
+                    "지원되지 않는 파일 형식입니다. CSV, XLS, XLSX 파일만 지원됩니다."
+                )
+
+            if df.empty:
+                raise ValueError("파일에 데이터가 없습니다.")
+
+            return df
+        except pd.errors.EmptyDataError:
+            raise ValueError("파일이 비어있거나 파싱할 수 있는 열이 없습니다.")
+        except Exception as e:
+            raise ValueError(f"파일을 불러오는 중 오류가 발생했습니다: {str(e)}")
 
     def _create_database(self):
-        # SQLite 데이터베이스 생성 및 데이터 삽입
         conn = sqlite3.connect(f"{self.file_name}.db")
-        self.df.to_sql(self.file_name, conn, index=False, if_exists="replace")
+        self.df.to_sql(self.table_name, conn, index=False, if_exists="replace")
+
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT name FROM sqlite_master WHERE type='table' AND name='{self.table_name}'"
+        )
+        if cursor.fetchone() is None:
+            raise ValueError(f"Failed to create table: {self.table_name}")
+
         return conn
 
+    def _create_sql_database(self):
+        db_path = f"sqlite:///{self.file_name}.db"
+        try:
+            db = SQLDatabase.from_uri(db_path)
+            db.run(f"SELECT * FROM {self.table_name} LIMIT 1")
+            return db
+        except Exception as e:
+            raise ValueError(f"Failed to create SQLDatabase: {str(e)}")
+
     def _create_prompt(self):
-        # 커스텀 프롬프트 정의 및 컬럼 이름 포함
         cursor = self.conn.cursor()
-        cursor.execute(f"PRAGMA table_info({self.file_name})")
+        cursor.execute(f"PRAGMA table_info({self.table_name})")
         columns = [info[1] for info in cursor.fetchall()]
         columns_str = ", ".join(columns)
+        print(f"Table name: {self.table_name}")
+        print(f"Columns: {columns_str}")
 
         prompt = ChatPromptTemplate.from_messages(
             [
                 SystemMessagePromptTemplate.from_template(
                     f"""
-당신은 데이터베이스에 대한 전문가입니다. 사용자의 질문에 정확하고 상세한 답변을 제공해주세요. SQL 쿼리를 사용하여 데이터베이스에서 필요한 정보를 가져올 수 있습니다.
-가능하면 이전 대화 내용을 참고하여 사용자의 의도를 파악하고, 지시사항을 따르기 위해 필요한 도구를 사용해주세요.
+You are a database expert. Provide accurate and detailed answers to user questions. You can use SQL queries to retrieve necessary information from the database.
+If possible, refer to previous conversation content to understand the user's intent and use the necessary tools to follow instructions.
+The table name is '{self.table_name}' and it has the following columns: {columns_str}
 """
                 ),
                 MessagesPlaceholder(variable_name="chat_history"),
@@ -90,7 +134,6 @@ class SQLChatbot:
         return prompt
 
     def _initialize_agent_executor(self):
-        # 에이전트 실행기 초기화
         agent_executor = initialize_agent(
             agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
             llm=self.llm,
@@ -104,89 +147,78 @@ class SQLChatbot:
         return agent_executor
 
     def _extract_exception_words(self):
-        # 모든 컬럼에서 예외 단어 추출
-        exception_words_set = set()
-
-        # 각 컬럼에서 고유 값 추출하여 집합에 추가
+        exception_words = set()
+        # 컬럼명 추가
+        exception_words.update(self.df.columns)
+        # 각 컬럼의 고유한 값들 추가
         for column in self.df.columns:
-            # NaN 값 제거 후 문자열로 변환하여 고유 값 추출
-            unique_values = self.df[column].dropna().astype(str).unique()
-            exception_words_set.update(unique_values)
-
-        # 집합을 리스트로 변환하여 반환
-        exception_words = list(exception_words_set)
-        return exception_words
+            exception_words.update(self.df[column].astype(str).unique())
+        return list(exception_words)
 
     def process_response(self, response):
-        exception_words = self.exception_words
+        translator = GoogleTranslator(source="auto", target="ko")
 
-        # 예외 단어가 없을 경우 일반 번역 수행
-        if not exception_words:
-            translated_response = GoogleTranslator(
-                source="auto", target="ko"
-            ).translate(response)
-            return translated_response
-
-        # 예외 단어를 플레이스홀더로 대체
-        placeholder_mapping = {}
-        for idx, word in enumerate(exception_words):
+        # 예외 단어들을 위한 임시 플레이스홀더 생성
+        placeholders = {}
+        for idx, word in enumerate(self.exception_words):
             placeholder = f"__EXCEPTION_{idx}__"
-            pattern = r"\b{}\b".format(re.escape(word))
-            response = re.sub(pattern, placeholder, response, flags=re.IGNORECASE)
-            placeholder_mapping[placeholder] = word
+            placeholders[word] = placeholder
+            response = re.sub(
+                r"\b" + re.escape(word) + r"\b",
+                placeholder,
+                response,
+                flags=re.IGNORECASE,
+            )
 
         # 번역 수행
-        translated_response = GoogleTranslator(source="auto", target="ko").translate(
-            response
-        )
+        translated = translator.translate(response)
 
-        # 플레이스홀더를 원래 단어로 복원
-        for placeholder, word in placeholder_mapping.items():
-            translated_response = translated_response.replace(placeholder, word)
+        # 플레이스홀더를 원래 단어로 대체
+        for word, placeholder in placeholders.items():
+            translated = translated.replace(placeholder, word)
 
-        return translated_response
+        return translated
 
     def ask_question(self, question, num_trials=3):
         responses = []
         total_tokens_used = 0
         for i in range(num_trials):
             with get_openai_callback() as cb:
-                response = self.agent_executor.run(input=question)
-                # 응답 후처리
-                response = self.process_response(response)
-                responses.append(response)
-                total_tokens_used += cb.total_tokens
-        # 응답 빈도 계산
+                try:
+                    response = self.agent_executor.run(input=question)
+                    response = self.process_response(response)
+                    responses.append(response)
+                    total_tokens_used += cb.total_tokens
+                except Exception as e:
+                    print(f"Error in trial {i+1}: {str(e)}")
+                    responses.append(f"Error: {str(e)}")
+
         response_count = Counter(responses)
         most_common_response = response_count.most_common(1)[0][0]
-        print(f"가장 빈번한 응답: {most_common_response}")
-        # 모든 응답 출력
+        print(f"Most frequent response: {most_common_response}")
+
         print(f"User: {question}")
         for idx, resp in enumerate(responses):
             print(f"Assistant (Trial {idx+1}): {resp}")
-        # 응답 일관성 확인
+
         if all(resp == responses[0] for resp in responses):
-            print("모든 응답이 동일합니다.")
+            print("All responses are identical.")
         else:
-            print("응답이 서로 다릅니다.")
+            print("Responses differ.")
+
         print(f"Total Tokens Used: {total_tokens_used}\n")
         return most_common_response
 
 
-# 사용 예시
+# Usage example
 if __name__ == "__main__":
-    # 파일 경로 설정
-    file_path = "/content/sports.xlsx"  # 실제 파일 경로로 변경하세요
+    file_path = "/content/sports.xlsx"  # Change to your actual file path
 
-    # SQLChatbot 인스턴스 생성
-    chatbot = SQLChatbot(file_path)
-
-    # # csv 예시 상호 작용
-    # chatbot.ask_question("가장 높은 공격력을 가진 포켓몬의 이름은 무엇인가요?")
-    # chatbot.ask_question("그 포켓몬의 타입은 무엇인가요?")
-    # chatbot.ask_question("방금 말한 포켓몬의 방어력은 얼마인가요?")
-    # chatbot.ask_question("그래서 지금 이야기하는 포켓몬 이름이 뭐라고?")
-
-    # # xlsx 예시 상호 작용
-    # chatbot.ask_question("무슨 컬럼이 있어?")
-    # chatbot.ask_question("가장 좋은 답변 결과를 가진 스포츠는?")
+    try:
+        chatbot = SQLChatbot(file_path)
+        chatbot.ask_question("What columns are in the table?")
+        chatbot.ask_question(
+            "What is the name of the sport with the best answer results?"
+        )
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
