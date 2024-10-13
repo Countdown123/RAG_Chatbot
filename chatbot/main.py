@@ -45,6 +45,8 @@ models.Base.metadata.create_all(bind=engine)
 from user.user_crud import *
 from models import *
 
+from metadata import SQLChatbot
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -65,6 +67,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # OAuth2 setup
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# SQLChatbot setup
+sql_chatbot = None
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
@@ -335,67 +340,25 @@ async def websocket_endpoint(websocket: WebSocket):
                             "timestamp": datetime.now().isoformat(),
                         }
                         messages.append(sent_message)
-                        # Check for uploaded data files
-                        uploaded_files = (
-                            db.query(FileModel)
-                            .filter(
-                                FileModel.chat_id == chat_id,
-                                FileModel.user_id == user.id,
-                            )
-                            .all()
-                        )
-                        valid_extensions = ["xlsx", "xls", "csv"]
-                        data_files = [
-                            f
-                            for f in uploaded_files
-                            if f.filename.split(".")[-1].lower() in valid_extensions
-                        ]
-                        if data_files:
-                            # Initialize the agent
-                            llm = ChatOpenAI(
-                                model_name="gpt-3.5-turbo",
-                                temperature=0,
-                                openai_api_key=openai_api_key,
-                            )
-                            db_path = "data/chatbot_data.db"
-                            db_sql = SQLDatabase.from_uri(f"sqlite:///{db_path}")
-
-                            agent_executor = create_sql_agent(
-                                llm=llm,
-                                db=db_sql,
-                                agent_type="openai-tools",
-                                verbose=True,
-                            )
-                            # Process the message with the agent
+                        if sql_chatbot:
                             try:
-                                # Since agent_executor.run might be blocking, use run_in_executor
-                                loop = asyncio.get_event_loop()
-                                response = await loop.run_in_executor(
-                                    None, agent_executor.run, data
-                                )
+                                response = sql_chatbot.ask_question(data)
                             except Exception as e:
-                                logger.error(f"Error during agent execution: {e}")
-                                response = "Sorry, I could not process your request."
-
-                            await websocket.send_text(response)
-                            # Append the received message
-                            received_message = {
-                                "type": "received",
-                                "content": response,
-                                "timestamp": datetime.now().isoformat(),
-                            }
-                            messages.append(received_message)
+                                logger.error(f"Error processing question: {e}")
+                                response = "Sorry, I encountered an error while processing your question."
                         else:
-                            # No data files uploaded; handle chat without agent
-                            response = "You have no data files uploaded. You can still chat, but advanced functionalities are limited."
-                            await websocket.send_text(response)
-                            # Append the system response
-                            received_message = {
-                                "type": "received",
-                                "content": response,
-                                "timestamp": datetime.now().isoformat(),
-                            }
-                            messages.append(received_message)
+                            response = (
+                                "Please upload a data file before asking questions."
+                            )
+
+                        await websocket.send_text(response)
+
+                        received_message = {
+                            "type": "received",
+                            "content": response,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                        messages.append(received_message)
 
                         # Update the database
                         db_chat.messages = json.dumps(messages)
@@ -437,6 +400,9 @@ async def upload_file(
         )
         .first()
     )
+
+    global sql_chatbot
+
     if not db_chat:
         raise HTTPException(status_code=404, detail="Chat session not found.")
 
@@ -527,34 +493,18 @@ async def upload_file(
         if extension in ["xlsx", "xls", "csv"]:
             # Process data files
             try:
-                if extension == "csv":
-                    df = pd.read_csv(file_path, header=None)
-                else:
-                    df = pd.read_excel(file_path, header=None)
-                # Assign default column names
-                df.columns = [f"column_{i}" for i in range(len(df.columns))]
-                # Clean column names
-                df.columns = [str(col).strip().replace(" ", "_") for col in df.columns]
-                # Replace infinite values with NaN
-                df.replace([np.inf, -np.inf], np.nan, inplace=True)
-                # Replace NaN with 0
-                df.fillna(0, inplace=True)
-                # Create an engine to the SQLite database
-                data_db_path = "data/chatbot_data.db"
-                data_engine = create_engine(f"sqlite:///{data_db_path}", echo=False)
-                # Replace hyphens with underscores in chat_id
-                sanitized_chat_id = chat_id.replace("-", "_")
-                # Provide a table name with sanitized chat_id
-                table_name = f"table_{current_user.id}_{sanitized_chat_id}_{db_file.id}"
-                # Write the DataFrame into the SQLite database
-                df.to_sql(table_name, con=data_engine, if_exists="replace", index=False)
-                logger.info(
-                    f"Data from file '{filename}' loaded into table '{table_name}'"
+                sanitized_filename = "".join(
+                    e for e in filename if e.isalnum() or e in [".", "_"]
                 )
+                sql_chatbot = SQLChatbot(file_path, sanitized_filename)
+            except ValueError as e:
+                logger.error(f"Error initializing SQLChatbot: {str(e)}")
+                raise HTTPException(status_code=400, detail=str(e))
             except Exception as e:
-                logger.error(f"Error processing file '{filename}': {e}")
+                logger.error(f"Unexpected error initializing SQLChatbot: {str(e)}")
                 raise HTTPException(
-                    status_code=500, detail=f"Error processing file: {e}"
+                    status_code=500,
+                    detail="An unexpected error occurred while processing the file.",
                 )
         elif extension == "pdf":
             # For PDF files, generate and store metadata
