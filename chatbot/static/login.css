@@ -1,206 +1,136 @@
 * {
-  font-family: "Noto Sans KR", sans-serif;
-  font-size: 20px;
-  font-weight: 800;
-}
-
-body,
-html {
-  height: 100%;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  background-color: #f4f4f4;
-  width: 100%;
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 20px;
-  background-color: #f4f4f4;
-  color: #fff;
   box-sizing: border-box;
-  position: relative;
 }
 
-.header::after {
-  content: "";
-  position: absolute;
-  bottom: -4px;
-  left: 0;
-  width: 100%;
-  height: 4px;
-  background: #487AFF;
-}
-
-.logo,
-.title-logo {
-  white-space: nowrap;
+html, body {
+  height: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 0;
 }
 
-.title-logo {
-  text-decoration: none;
-  color: #487AFF;
-  font-family: "Alfa Slab One", serif;
-  font-weight: 400;
-  font-style: normal;
-  font-size: 30px;
+.container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
 }
 
-.main-content {
+/* 왼쪽 그라데이션 배경 */
+.left-section {
+  flex: 1;
+  background: linear-gradient(135deg, #2687fd, #739ff7); 
+  display: flex;
+  flex-direction: column; 
+  justify-content: flex-start;
+  align-items: center;
+  text-align: center; 
+  color: white;
+  font-family: 'Alfa Slab One', serif;
+  font-size: 48px;
+  font-weight: 100; 
+  padding: 20px;
+}
+
+.retriever-image-login {
+  width: 220px; 
+  height: auto;
+  margin-top: 50px;
+  margin-bottom: -20px;
+}
+
+.left-section h1 {
+  margin: 0;
+  padding: 0;
+  font-size: 40px;
+  letter-spacing: 1px;
+  font-family: 'Noto Sans', sans-serif; 
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* 오른쪽 폼 섹션 */
+.right-section {
+  flex: 1;
+  padding: 40px;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  align-items: center;
-  width: 100%;
-  position: relative;
-  margin-top: auto;
-  margin-bottom: auto;
-  transform: translateY(-30px);
+  background-color: #fff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.right-section h2 {
+  font-family: 'Noto Sans', sans-serif; 
+  font-size: 35px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.right-section p {
+  font-family: 'Noto Sans', sans-serif; 
+  font-size: 14px;
+  margin-bottom: 20px;
+  color: #666;
 }
 
 form {
   display: flex;
   flex-direction: column;
-  align-items: center; /* This centers items horizontally */
-  width: 100%;
-  max-width: 300px;
 }
 
-#label-email,
-#label-password {
-  display: block;
-  width: 100%;
-  text-align: center;
-  margin: 20px 0 5px 0;
-}
-
-/* Keep the margin-top for spacing */
-#label-password {
-  margin-top: 20px;
-}
-
-/* Target the input fields by their form id and input type */
-#loginForm input[type="email"],
-#loginForm input[type="password"] {
-  border: 2px solid #a3a3a3 !important;  /* Thicker border */
-  padding: 12px !important;  /* Consistent padding */
-  width: 100% !important;
-  margin: 5px 0 !important;
-  border-radius: 10px !important;  /* Rounded corners */
-  box-shadow: none !important; /* Remove any browser default shadow */
-  appearance: none !important; /* Remove default browser styles */
-}
-
-/* Focus state to highlight when clicked */
-#loginForm input[type="email"]:focus,
-#loginForm input[type="password"]:focus {
-  border-color: #487AFF !important; /* Blue border when focused */
-  outline: none !important; /* Remove default outline */
-} 
-
-.line {
-  width: 50vh;
-  display: flex;
-  align-items: center;
-  color: #888;
-  font-size: 14px;
-  margin: 8px 0;
-  margin-top: 20px;
+input[type="email"],
+input[type="password"] {
+  padding: 12px;
   margin-bottom: 20px;
-}
-
-.line::before,
-.line::after {
-  content: "";
-  flex-grow: 1;
-  margin: 0 16px;
-  background-color: #ccc;
-  height: 1px;
-}
-
-button.lower-login,
-button.signup {
-  padding: 10px;
-  margin: 5px 0;
-  background-color: #487AFF;
-  color: black;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-button.lower-login {
-  margin-top: 20px;
-}
-
-button.reset-password {
-  padding: 10px;
-  margin: 5px 0;
-  background-color: #d9d9d9;
-  color: black;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  margin-top: 20px;
-}
-
-button {
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  font-size: 16px;
   width: 100%;
+  font-family: 'Noto Sans', sans-serif; 
 }
 
-button:hover {
-  background-color: #a3a3a3;
+input:focus {
+  border-color: #4e54c8;
+  outline: none;
 }
 
-.info {
-  font-size: 30px;
+.options {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  font-family: 'Noto Sans', sans-serif; 
 }
 
-.error {
-  color: red;
-  font-size: 0.9em;
-  margin: 5px 0;
+button.login-btn {
+  font-family: 'Noto Sans', sans-serif; 
+  padding: 12px;
+  border-radius: 8px;
+  background-color: #609aff;
+  color: white;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  font-weight: 600;
 }
 
-button,
-button.lower-login {
-  width: 108%;
+button.login-btn:hover {
+  background-color: #577ecb;
 }
 
-@keyframes shake {
-
-  0%,
-  100% {
-    transform: translateX(0) translateY(-30px);
-  }
-
-  10%,
-  30%,
-  50%,
-  70%,
-  90% {
-    transform: translateX(-10px) translateY(-30px);
-  }
-
-  20%,
-  40%,
-  60%,
-  80% {
-    transform: translateX(10px) translateY(-30px);
-  }
+p {
+  margin-top: 20px;
+  font-size: 14px;
+  text-align: center;
+  font-family: 'Noto Sans', sans-serif;
 }
 
-.shake-animation {
-  animation: shake 0.82s cubic-bezier(.36, .07, .19, .97) both;
-  transform: translate3d(0, 0, 0);
-  backface-visibility: hidden;
-  perspective: 1000px;
+p a {
+  color: #4e54c8;
+  text-decoration: none;
+}
+
+p a:hover {
+  text-decoration: underline;
 }

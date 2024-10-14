@@ -1,92 +1,87 @@
-<!-- templates/signup.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Signup</title>
-  <link rel="stylesheet" href="/static/signup.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap" rel="stylesheet" />
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap" rel="stylesheet" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up</title>
+  <link rel="stylesheet" href="/static/signup.css?v=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Noto+Sans:wght@400;700&display=swap" rel="stylesheet">
 </head>
+
 <body>
-  <header class="header">
-    <div class="logo"><a href="/" class="title-logo">SERVICE</a></div>
-    <form action="/login.html" method="get" class="login-form">
-      <button type="submit" class="upper-login" onmouseover="toggleNavbarColor(true)"
-        onmouseout="toggleNavbarColor(false)">
-        로그인
-      </button>
-    </form>
-  </header>
+  <div class="container">
+    <!-- 왼쪽 그라데이션 섹션 -->
+    <div class="left-section">
+      <img src="/static/dog_footprints.png" alt="Retriever Image" class="retriever-image">
+      <h2>Join Retriever Today!</h2>
+    </div>
 
-  <div class="main-content">
-    <h2 class="info">회원가입</h2>
-    <form id="signupForm">
-      <label for="email" id="label-email">이메일</label>
-      <input type="email" name="email" placeholder="Email" id="email" required />
+    <!-- 오른쪽 회원가입 폼 섹션 -->
+    <div class="right-section">
+      <h2>Sign Up</h2>
+      <p>Create an account by filling in the information below.</p>
+      <form id="signupForm">
+        <label for="email" id="label-email">Email</label>
+        <input type="email" name="email" id="email" required placeholder="username@email.com">
 
-      <label for="password" id="label-password">비밀번호</label>
-      <input type="password" name="password" placeholder="Password" id="password" required />
+        <label for="password" id="label-password">Password</label>
+        <input type="password" name="password" id="password" required placeholder="Password">
 
-      <label for="confirm-password" id="label-confirm-password">비밀번호 확인</label>
-      <input type="password" name="confirm_password" placeholder="Confirm Password" id="confirm-password" required />
+        <label for="confirm-password" id="label-confirm-password">Confirm Password</label>
+        <input type="password" name="confirm_password" id="confirm-password" required placeholder="Confirm Password">
 
-      <button type="submit" class="signup">회원가입</button>
-    </form>
+        <button type="submit" class="signup-btn">Sign Up</button>
+      </form>
 
-    <div class="line">또는</div>
-
-    <form action="/login.html" method="get">
-      <button type="submit" class="lower-login">로그인</button>
-    </form>
+      <p>Already have an account? <a href="/login.html">Log in</a></p>
+    </div>
   </div>
 
-<script>
+  <script>
     document.addEventListener("DOMContentLoaded", function () {
       var signupForm = document.getElementById("signupForm");
-      if (signupForm) {
-        signupForm.addEventListener("submit", async function (event) {
-          event.preventDefault();
 
-          var email = document.getElementById("email").value.trim();
-          var password = document.getElementById("password").value.trim();
-          var confirmPassword = document.getElementById("confirm-password").value.trim();
+      signupForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
 
-          if (password !== confirmPassword) {
-            alert("Passwords do not match.");
-            return;
+        var email = document.getElementById("email").value.trim();
+        var password = document.getElementById("password").value.trim();
+        var confirmPassword = document.getElementById("confirm-password").value.trim();
+
+        // 비밀번호 확인
+        if (password !== confirmPassword) {
+          alert("Passwords do not match.");
+          return;
+        }
+
+        var formData = new FormData();
+        formData.append("email", email);
+        formData.append("password", password);
+        formData.append("confirm_password", confirmPassword);
+
+        try {
+          let response = await fetch("/users/", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (response.ok) {
+            alert("Registration successful! Please log in.");
+            window.location.href = "/login.html";
+          } else {
+            const data = await response.json();
+            console.error("Error Details:", data);
+            alert("Error: " + (data.detail || 'Registration failed.'));
           }
-
-          var formData = new FormData();
-          formData.append("email", email);
-          formData.append("password", password);
-          formData.append("confirm_password", confirmPassword);
-
-          try {
-            let response = await fetch("/users/", {
-              method: "POST",
-              body: formData,
-            });
-
-            if (response.ok) {
-              alert("Registration successful! Please log in.");
-              window.location.href = "/login.html";
-            } else {
-              const data = await response.json();
-              console.error("Error Details:", data);
-              alert("Error: " + (data.detail || "Registration failed."));
-            }
-          } catch (error) {
-            console.error("Error during registration:", error);
-            alert("An error occurred. Please try again later.");
-          }
-        });
-      } else {
-        console.error("The signup form was not found.");
-      }
+        } catch (error) {
+          console.error("Error during registration:", error);
+          alert("An error occurred. Please try again later.");
+        }
+      });
     });
   </script>
 </body>

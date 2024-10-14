@@ -53,13 +53,44 @@ body {
 
 #messages li.sent {
   background-color: #0b93f6;
-  align-self: flex-end;
+  align-self: flex-end; 
+  max-width: 85%;
 }
 
 #messages li.received {
   background-color: #e5e5ea;
   color: black;
   align-self: flex-start;
+  background-image: url('/static/retriever.png');
+  background-repeat: no-repeat;
+  background-size: 40px 40px; 
+  background-position: 10px center; 
+  padding-left: 60px; 
+  border-radius: 20px;
+  max-width: 80%;
+}
+
+form button {
+  padding: 10px;
+  background-color: #0b93f6;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 30px;
+  width: 50px;
+  height: 50px;
+}
+
+form button:hover {
+  background-color: #0a72bc;
+}
+
+form button i {
+  font-size: 20px; /* 비행기 아이콘 크기 */
 }
 
 .typing {
@@ -107,6 +138,7 @@ button {
   background-color: #0b93f6;
   color: white;
   border: none;
+  font-size: 10px;
   cursor: pointer;
 }
 
@@ -122,6 +154,7 @@ button:hover {
   display: flex;
   flex-direction: column;
 }
+
 
 .history-container {
   height: 50%;

@@ -10,6 +10,8 @@
   
   <!-- Your Custom CSS -->
   <link rel="stylesheet" href="/static/style.css" />
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   
   <!-- jQuery (required for DataTables) -->
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -122,14 +124,15 @@
     form button {
         padding: 10px 20px;
         border: none;
-        background-color: #4CAF50;
+        background-color: #2687fd;
         color: white;
         border-radius: 0 20px 20px 0;
+        font-size: 13px;
         cursor: pointer;
     }
 
     form button:hover {
-        background-color: #45a049;
+        background-color: #4e86e6;
     }
 
     .right-container {
@@ -217,7 +220,9 @@
           placeholder="Type your message..."
           required
         />
-        <button type="submit">Send</button>
+        <button type="submit">
+            <i class="fa fa-paper-plane"></i> 
+          </button>
       </form>
     </div>
     <div class="right-container">
@@ -252,7 +257,7 @@
   </div>
 
   <!-- Logout Button -->
-  <button id="logoutBtn" style="position: fixed; bottom: 20px; right: 20px; padding: 10px; background-color: #ff4d4d; color: white; border: none; cursor: pointer;">Logout</button>
+  <button id="logoutBtn" style="position: fixed; bottom: 20px; font-size: 16px; right: 20px; padding: 10px; background-color: #ff4d4d; color: white; border: none; cursor: pointer;">Logout</button>
 
   <!-- Modal Structure for Displaying Tables -->
   <div id="tableModal" class="modal">
