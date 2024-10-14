@@ -47,6 +47,8 @@ from models import *
 
 from metadata import SQLChatbot
 
+from graph import process_files,create_qa_workflow ,GraphState,process_query,create_file_processing_workflow
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -262,7 +264,6 @@ async def get_chats(
     ]
     return chat_list
 
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     token = websocket.query_params.get("token")
@@ -295,6 +296,9 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_text("OpenAI API Key is not set.")
         return
 
+    qa_workflow = create_qa_workflow()  # 워크플로우를 한 번만 생성
+    graph_state = None  # 그래프 상태를 저장할 변수
+
     try:
         while True:
             data = await websocket.receive_text()
@@ -319,6 +323,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 save_chat_history_to_file(user.id, chat_id, messages)
                 # Send confirmation to client
                 await websocket.send_text(f"Chat {chat_id} started.")
+                graph_state = None  # 새 채팅 시작 시 그래프 상태 초기화
+                logger.info(f"Graph state initialized to None for new chat: {chat_id}")
             else:
                 # Handle normal chat messages
                 if chat_id:
@@ -340,16 +346,77 @@ async def websocket_endpoint(websocket: WebSocket):
                             "timestamp": datetime.now().isoformat(),
                         }
                         messages.append(sent_message)
-                        if sql_chatbot:
-                            try:
-                                response = sql_chatbot.ask_question(data)
-                            except Exception as e:
-                                logger.error(f"Error processing question: {e}")
-                                response = "Sorry, I encountered an error while processing your question."
+
+                        # 파일 타입 확인
+                        file_query = db.query(FileModel).filter(FileModel.chat_id == chat_id).first()
+                        if file_query:
+                            file_extension = file_query.filename.split('.')[-1].lower()
+                            logger.info(f"File type for chat {chat_id}: {file_extension}")
+                            if file_extension in ['csv', 'xlsx', 'xls'] and sql_chatbot:
+                                try:
+                                    response = sql_chatbot.ask_question(data)
+                                except Exception as e:
+                                    logger.error(f"Error processing question: {e}")
+                                    response = "Sorry, I encountered an error while processing your question."
+                            elif file_extension == 'pdf':
+                                try:
+                                    metadata_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_query.id).first()
+                                    if metadata_record:
+                                        file_metadata = json.loads(metadata_record.file_metadata)
+                                        index_name = file_metadata.get('index_name')
+                                        logger.info(f"index_name 값: {index_name}")
+                                        logger.info(f"Full metadata for file: {json.dumps(file_metadata, indent=2)}")
+
+                                        if not index_name:
+                                            raise HTTPException(status_code=400, detail="Pinecone index name is missing.")
+
+                                        if index_name:
+                                            if graph_state is None or isinstance(graph_state, dict):
+                                                graph_state = GraphState(
+                                                    question=data,
+                                                    db=index_name,
+                                                    search_filters=[],
+                                                    next_node="chat_interface",
+                                                    metadata=file_metadata.get('metadata', {})  # 여기에 메타데이터 추가
+
+                                                )
+                                                logger.info(f"New graph state created: {graph_state}")
+                                            else:
+                                                graph_state.question = data
+                                                graph_state.next_node = "chat_interface"
+                                                graph_state.metadata = file_metadata.get('metadata', {})  # 메타데이터 업데이트
+
+                                                logger.info(f"Updated graph state: {graph_state}")
+
+                                            logger.info(f"Processing query with graph state: {graph_state}")
+                                            result = process_query(graph_state)
+                                            
+                                            answer = result.get("answer", "")
+                                            page_numbers = result.get("page_numbers", [])
+                                            speakers = result.get("speakers", [])
+                                            quotes = result.get("quotes", [])
+                                            response = f"""답변:
+                                            {answer}
+
+                                            확인된 페이지:
+                                            {', '.join(map(str, page_numbers))}
+
+                                            발언자:
+                                            {', '.join(speakers)}
+
+                                            인용문:
+                                            """ + "\n\n".join(f"{i+1}. {quote}" for i, quote in enumerate(quotes))
+                                        else:
+                                            response = "Error: Pinecone index name not found for this PDF file."
+                                    else:
+                                        response = "Error: Metadata not found for this PDF file."
+                                except Exception as e:
+                                    logger.error(f"Error processing PDF question: {str(e)}", exc_info=True)
+                                    response = f"Sorry, I encountered an error while processing your question for the PDF: {str(e)}"
+                            else:
+                                response = "Unsupported file type for this chat session."
                         else:
-                            response = (
-                                "Please upload a data file before asking questions."
-                            )
+                            response = "Please upload a data file before asking questions."
 
                         await websocket.send_text(response)
 
@@ -365,6 +432,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         db.commit()
                         # Save the updated chat history to JSON file
                         save_chat_history_to_file(user.id, chat_id, messages)
+                        logger.info(f"Chat history updated for chat {chat_id}")
                     else:
                         error_msg = "Error: Chat session not found."
                         await websocket.send_text(error_msg)
@@ -375,13 +443,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_text(error_msg)
                     logger.error("Error: No chat session established.")
     except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for user {user.email}")
         manager.disconnect(websocket)
         db.close()
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"Error in WebSocket connection: {e}")
         manager.disconnect(websocket)
         db.close()
-
 
 @app.post("/upload/")
 async def upload_file(
@@ -390,8 +458,6 @@ async def upload_file(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # allowed_extensions = ["xlsx", "xls", "csv", "pdf"]
-
     # Verify that the chat_id exists for the user
     db_chat = (
         db.query(ChatHistory)
@@ -467,6 +533,7 @@ async def upload_file(
         # Save the uploaded file to the chat's files directory
         try:
             file_path = save_uploaded_file(current_user.id, chat_id, file)
+            
         except Exception as e:
             logger.error(f"Error saving uploaded file: {e}")
             raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
@@ -491,7 +558,6 @@ async def upload_file(
 
         # Process the file based on its type
         if extension in ["xlsx", "xls", "csv"]:
-            # Process data files
             try:
                 sanitized_filename = "".join(
                     e for e in filename if e.isalnum() or e in [".", "_"]
@@ -506,32 +572,73 @@ async def upload_file(
                     status_code=500,
                     detail="An unexpected error occurred while processing the file.",
                 )
+        
         elif extension == "pdf":
-            # For PDF files, generate and store metadata
-            metadata = generate_pdf_metadata(file_path)
-            new_metadata = FileMetadata(
-                file_id=db_file.id,
-                chat_id=db_file.chat_id,
-                file_metadata=json.dumps(metadata),
-            )
-            db.add(new_metadata)
-            db.commit()
-            logger.info(f"Generated and saved metadata for file ID: {db_file.id}")
+            try:
+                file_processing_app = create_file_processing_workflow()
+                
+                state = GraphState(
+                    file_paths=[file_path],
+                    question="",
+                    answer="",
+                    verification_result=False,
+                    page_numbers=[],
+                    db="",
+                    pdfs_loaded=True,
+                    verification_count=0,
+                    excluded_pages=set(),
+                    next_question=True,
+                    file_types=[extension],
+                    next_node="",
+                    processed_data="",
+                    max_pages=0,
+                    metadata={"file_names": [], "speakers": [], "max_pages": 0}
+                )
 
-        # Append to file_list to return
+                for output in file_processing_app.stream(state):
+                    current_node = next(iter(output))
+                    new_state = output[current_node]
+
+                    if isinstance(new_state, dict):
+                        logger.debug(f"New state from {current_node}: {new_state}")
+                        state.update(new_state)
+                    else:
+                        raise ValueError(f"Unexpected result type from processing node: {type(new_state)}")
+
+                    if current_node == "vector_storage" and 'db' in state:
+                        logger.debug("Vector storage completed")
+                        break
+                    elif 'db' not in state:
+                        raise ValueError("db field is missing in the state object")
+
+                logger.info(f"PDF file processed and vectors stored for {filename}")
+
+                result = {
+                    "index_name": state.get("db", ""),
+                    "max_pages": state.get("max_pages", 0),
+                    "metadata": state.get("metadata", {}),
+                }
+
+                new_metadata = FileMetadata(
+                    file_id=db_file.id,
+                    chat_id=chat_id,
+                    file_metadata=json.dumps(result)
+                )
+                db.add(new_metadata)
+                db.commit()
+                logger.info(f"PDF metadata saved to database for file ID: {db_file.id}")
+                logger.info(f"Metadata content: {json.dumps(result, indent=2)}")
+
+            except Exception as e:
+                logger.error(f"Error processing PDF file: {str(e)}")
+                raise HTTPException(status_code=500, detail="Failed to process PDF file.")
+
+        # 파일 리스트에 추가
         file_list.append({"id": db_file.id, "filename": db_file.filename, "upload_time": db_file.upload_time})
 
-    # Return the updated list of files
-    files_in_chat = (
-        db.query(FileModel)
-        .filter(FileModel.user_id == current_user.id, FileModel.chat_id == chat_id)
-        .all()
-    )
-    file_list = [
-        {"id": f.id, "filename": f.filename, "upload_time": f.upload_time}
-        for f in files_in_chat
-    ]
-    return {"fileList": file_list}
+    # 최종적으로 클라이언트로 응답 반환
+    logger.info(f"File upload completed. File list: {file_list}")
+    return {"fileList": file_list, "message": "File processed successfully"}
 
 
 @app.get("/files/")
@@ -561,9 +668,7 @@ async def get_file_data(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    logger.info(
-        f"Fetching file data for file_id: {file_id}, user_id: {current_user.id}"
-    )
+    logger.info(f"Fetching file data for file_id: {file_id}, user_id: {current_user.id}")
 
     db_file = (
         db.query(FileModel)
@@ -586,24 +691,10 @@ async def get_file_data(
             db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
         )
         if not metadata_record:
-            logger.warning(
-                f"Metadata not found for file ID: {file_id}. Generating new metadata."
+            raise HTTPException(
+                status_code=404, detail=f"Metadata not found for file ID: {file_id}"
             )
-            metadata = generate_pdf_metadata(filepath)
-
-            new_metadata = FileMetadata(
-                file_id=db_file.id,
-                chat_id=db_file.chat_id,
-                file_metadata=json.dumps(metadata),
-            )
-            db.add(new_metadata)
-            db.commit()
-            logger.info(f"Generated and saved new metadata for file ID: {file_id}")
-        else:
-            metadata = json.loads(metadata_record.file_metadata)
-            raise HTTPException(status_code=400, detail="Unsupported file type")
-
-        return {"metadata": metadata}
+        return {"metadata": json.loads(metadata_record.file_metadata)}
     elif extension in ["xlsx", "xls", "csv"]:
         try:
             if extension in ["xlsx", "xls"]:
@@ -625,64 +716,8 @@ async def get_file_data(
         except Exception as e:
             logger.error(f"Error processing file '{filename}': {e}")
             raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
-    elif extension == "pdf":
-        # PDF 파일에 대한 메타데이터 반환
-        metadata_record = (
-            db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
-        )
-        if not metadata_record:
-            raise HTTPException(
-                status_code=404, detail=f"Metadata not found for file ID: {file_id}"
-            )
-        return {"metadata": json.loads(metadata_record.file_metadata)}
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type")
-
-
-# PDF 메타데이터 생성 함수
-def generate_pdf_metadata(filepath):
-    try:
-        pdf_loader = PyPDFLoader(filepath)
-        docs = pdf_loader.load()
-
-        full_text = "\n".join([doc.page_content for doc in docs])
-        llm = ChatOpenAI(model="gpt-3.5-turbo")  # ChatGPT 3.5 사용 (더 빠르고 저렴)
-
-        prompt = f"""
-        Analyze the following PDF content and extract the metadata with the following structure:
-        
-        - Document Title: Title of the document
-        - Authors: List of authors (if available)
-        - Section Headings: Key section headings from the document
-        - Key Topics: Major topics discussed in the document
-        - Notable Data Points: Any significant statistics, numbers, or facts in the text
-        - Summary: Brief summary of the document content
-
-        Use the following PDF text to extract the metadata:
-
-        PDF Text: {full_text[:1500]}  # 처음 1500자만 사용
-
-        Return the metadata as a structured key-value format.
-        """
-
-        metadata_response = llm.invoke(prompt)
-
-        metadata = {}
-        if metadata_response and hasattr(metadata_response, "content"):
-            metadata_text = metadata_response.content
-
-            lines = metadata_text.split("\n")
-            for line in lines:
-                if ": " in line:
-                    key, value = line.split(": ", 1)
-                    metadata[key.strip()] = value.strip()
-        else:
-            metadata = {"Error": "Failed to generate metadata"}
-
-        return metadata
-    except Exception as e:
-        logger.error(f"Error generating PDF metadata: {e}")
-        return {"Error": str(e)}
 
 
 @app.get("/history/{chat_id}")
@@ -720,153 +755,64 @@ async def get_chat_history(
     else:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-
-@app.post("/upload_pdf/")
-async def upload_pdf(
-    file: UploadFile = File(...),
-    chat_id: str = Form(...),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    pdf_path = f"uploads/{file.filename}"
-    with open(pdf_path, "wb") as f:
-        f.write(await file.read())
-
-    db_file = (
-        db.query(FileModel)
-        .filter(FileModel.chat_id == chat_id, FileModel.filename == file.filename)
-        .first()
-    )
-
-    if db_file:
-        existing_metadata = (
-            db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
-        )
-        if not existing_metadata:
-            pdf_loader = PyPDFLoader(pdf_path)
-            docs = pdf_loader.load()
-
-            full_text = "\n".join([doc.page_content for doc in docs])
-            llm = ChatOpenAI(model="gpt-4")
-
-            prompt = f"""
-            Analyze the following PDF content and extract the metadata with the following structure:
-            
-            - Document Title: Title of the document
-            - Authors: List of authors
-            - Section Headings: Key section headings from the document
-            - Key Topics: Major topics discussed in the document
-            - Notable Data Points: Any significant statistics, numbers, or facts in the text
-            - Conclusion: Summary of the conclusion, if available
-
-            Use the following PDF text to extract the metadata:
-
-            PDF Text: {full_text[:1000]}
-
-            Return the metadata as a structured key-value format.
-            """
-
-            metadata_response = llm.invoke(prompt)
-
-            metadata = {}
-            if metadata_response and hasattr(metadata_response, "content"):
-                metadata_text = metadata_response.content
-
-                lines = metadata_text.split("\n")
-                for line in lines:
-                    if ": " in line:
-                        key, value = line.split(": ", 1)
-                        metadata[key.strip()] = value.strip()
-            else:
-                metadata = {
-                    "Error": (
-                        "Failed to parse metadata from GPT response"
-                        if metadata_response
-                        else "No metadata generated"
-                    )
-                }
-
-            db_metadata = FileMetadata(
-                chat_id=chat_id, file_id=db_file.id, file_metadata=json.dumps(metadata)
-            )
-            db.add(db_metadata)
-            db.commit()
-
-    files = (
-        db.query(FileModel)
-        .filter(FileModel.user_id == current_user.id, FileModel.chat_id == chat_id)
-        .all()
-    )
-    file_list = [
-        {"id": f.id, "filename": f.filename, "upload_time": f.upload_time}
-        for f in files
-    ]
-    return {"fileList": file_list}
-
-
 @app.get("/metadata/{file_id}")
 async def get_metadata(
     file_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    logger.info(f"Fetching metadata for file_id: {file_id}, user_id: {current_user.id}")
-
-    db_file = (
-        db.query(FileModel)
-        .filter(FileModel.id == file_id, FileModel.user_id == current_user.id)
-        .first()
-    )
-
-    if not db_file:
-        logger.warning(f"File not found: file_id={file_id}, user_id={current_user.id}")
-        raise HTTPException(status_code=404, detail="File not found")
-
-    metadata_record = (
-        db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
-    )
-
-    if not metadata_record:
-        logger.warning(
-            f"Metadata not found for file ID: {file_id}. Generating new metadata."
+    try:
+        # 파일 메타데이터를 조회
+        metadata_record = (
+            db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
         )
-        if db_file.filename.lower().endswith(".pdf"):
-            metadata = generate_pdf_metadata(db_file.filepath)
-            new_metadata = FileMetadata(
-                file_id=file_id,
-                chat_id=db_file.chat_id,
-                file_metadata=json.dumps(metadata),
-            )
-            db.add(new_metadata)
-            db.commit()
-            logger.info(f"Generated and saved new metadata for file ID: {file_id}")
-            return {"metadata": metadata}
-        else:
+        if not metadata_record:
+            logger.error(f"Metadata not found for file ID: {file_id}")
             raise HTTPException(
-                status_code=400,
-                detail="Metadata generation is only supported for PDF files",
+                status_code=404, detail=f"Metadata not found for file ID: {file_id}"
             )
+        
+        # 파일 기록을 조회
+        file_record = db.query(FileModel).filter(FileModel.id == file_id).first()
+        if not file_record:
+            logger.error(f"File record not found for file ID: {file_id}")
+            raise HTTPException(
+                status_code=404, detail=f"File record not found for file ID: {file_id}"
+            )
+        
+        logger.info(f"Metadata record: {metadata_record}")
+        logger.info(f"File record: {file_record}")
 
-    return {"metadata": json.loads(metadata_record.file_metadata)}
+        # 메타데이터를 JSON 형태로 변환
+        metadata = json.loads(metadata_record.file_metadata)
+        file_extension = file_record.filename.split('.')[-1].lower()
+
+        # PDF 파일에 대한 메타데이터 처리
+        if file_extension == 'pdf':
+            # 메타데이터를 변환하여 반환
+            transformed_metadata = {
+                "파일명": file_record.filename,
+                "발언자": ", ".join(metadata.get('metadata', {}).get('speakers', [])),
+                "총 페이지": metadata.get('max_pages', 'N/A'),
+                "인덱스 이름": metadata.get('index_name', '')  # 기존 'index_name'을 '인덱스 이름'으로 표시
+            }
+
+            # 추가 메타데이터 처리
+            for key, value in metadata.get('metadata', {}).items():
+                if key not in ['speakers', 'file_names', 'max_pages']:
+                    transformed_metadata[key] = value
+
+            return {"metadata": transformed_metadata}
+
+        # PDF 외의 파일에 대한 메타데이터 처리
+        else:
+            return {"metadata": metadata}
+
+    except Exception as e:
+        logger.error(f"Error fetching metadata for file ID: {file_id}, error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error fetching metadata. Please try again.")
 
 
-@app.get("/metadata/{file_id}")
-async def get_metadata(
-    file_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    # 파일 ID로 메타데이터 조회
-    metadata_record = (
-        db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
-    )
-
-    if not metadata_record:
-        raise HTTPException(
-            status_code=404, detail=f"Metadata not found for file ID: {file_id}"
-        )
-
-    return {"metadata": json.loads(metadata_record.file_metadata)}
 
 
 # Serve HTML pages

@@ -22,11 +22,44 @@ import gc
 import logging
 import json
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+import unicodedata
+from difflib import SequenceMatcher
+
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MAX_TOKENS = 110000
 
+def find_most_similar_speaker(query, speaker_list, threshold=0.6):
+    query = unicodedata.normalize('NFC', query)
+    best_match = None
+    highest_ratio = 0
+
+    for speaker in speaker_list:
+        normalized_speaker = unicodedata.normalize('NFC', speaker)
+        ratio = SequenceMatcher(None, query, normalized_speaker).ratio()
+        if ratio > highest_ratio:
+            highest_ratio = ratio
+            best_match = speaker
+
+    if highest_ratio >= threshold:
+        return best_match
+    return None
+def find_most_similar_item(query, item_list, threshold=0.6):
+    best_match = None
+    highest_ratio = 0
+
+    for item in item_list:
+        ratio = SequenceMatcher(None, query.lower(), item.lower()).ratio()
+        if ratio > highest_ratio:
+            highest_ratio = ratio
+            best_match = item
+
+    return best_match if highest_ratio >= threshold else None
 class GraphState(TypedDict):
     question: str
     answer: str
@@ -311,7 +344,7 @@ def chat_interface_node(state: GraphState) -> GraphState:
 
     client = wrap_openai(openai.Client())
     analysis_response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4",
         messages=[{"role": "user", "content": analysis_prompt}]
     )
     analysis_result = analysis_response.choices[0].message.content
@@ -319,15 +352,17 @@ def chat_interface_node(state: GraphState) -> GraphState:
     specific_files = []
     specific_pages = []
     specific_speakers = []
+    speaker_list = metadata.get('speakers', [])  # 여기서 speaker_list를 초기화합니다.
 
     for line in analysis_result.split('\n'):
         print(f"분석된 라인: {line}")
         if line.startswith('파일명:'):
             files = line.split(':')[1].strip()
             if files != '없음':
-                if 'file_names' in metadata:
-                    file_list = metadata['file_names']
-                    specific_files = [file for file in file_list if re.search(re.escape(files), file, re.IGNORECASE)]
+                file_list = metadata.get('file_names', [])
+                most_similar_file = find_most_similar_item(files, file_list)
+                if most_similar_file:
+                    specific_files = [most_similar_file]
             print(f"메타데이터에서 매칭된 파일명: {specific_files}")
 
         elif line.startswith('페이지 번호:'):
@@ -339,41 +374,34 @@ def chat_interface_node(state: GraphState) -> GraphState:
         elif line.startswith('발언자:'):
             speakers = line.split(':')[1].strip()
             if speakers != '없음':
-                if 'speakers' in metadata:
-                    speaker_list = metadata['speakers']
-                    specific_speakers = [speaker for speaker in speaker_list if re.search(speakers, speaker, re.IGNORECASE)]
-            print(f"메타데이터에서 매칭된 발언자: {specific_speakers}")
+                speaker_list = metadata.get('speakers', [])
+                most_similar_speaker = find_most_similar_speaker(speakers, speaker_list)
+                if most_similar_speaker:
+                    specific_speakers = [most_similar_speaker]
+            logger.info(f"Query: {speakers}")
+            logger.info(f"Speaker list: {speaker_list}")
+            logger.info(f"메타데이터에서 매칭된 발언자: {specific_speakers}")
     all_files = metadata.get('file_names', [])
     
     search_filters = []
-    if specific_speakers or specific_pages:
-        for file_name in all_files:  # 모든 파일에 대해 필터 생성
+    if specific_files:
+        for file_name in specific_files:
+            filter_dict = {"file_name": file_name}
             if specific_pages:
-                for page in specific_pages:
-                    if specific_speakers:
-                        for speaker in specific_speakers:
-                            search_filters.append({
-                                "file_name": file_name,
-                                "page_number": page,
-                                "speaker": speaker
-                            })
-                    else:
-                        search_filters.append({
-                            "file_name": file_name,
-                            "page_number": page
-                        })
-            else:
-                if specific_speakers:
-                    for speaker in specific_speakers:
-                        search_filters.append({
-                            "file_name": file_name,
-                            "speaker": speaker
-                        })
-    elif specific_files:
-        for specific_file in specific_files:
-            search_filters.append({"file_name": specific_file})
+                filter_dict["page_number"] = {"$in": specific_pages}
+            if specific_speakers:
+                filter_dict["speaker"] = {"$in": specific_speakers}
+            search_filters.append(filter_dict)
+    elif specific_pages or specific_speakers:
+        for file_name in all_files:  # 모든 파일에 대해 필터 생성
+            filter_dict = {"file_name": file_name}
+            if specific_pages:
+                filter_dict["page_number"] = {"$in": specific_pages}
+            if specific_speakers:
+                filter_dict["speaker"] = {"$in": specific_speakers}
+            search_filters.append(filter_dict)
 
-    # 다음 노드 결정 (수정된 로직)
+    # 다음 노드 결정
     if specific_speakers:
         next_node = 'query_processing_with_speaker'
         print(f"발언자가 검출되었습니다: {specific_speakers}. 다음 노드: query_processing_with_speaker")
@@ -394,7 +422,6 @@ def chat_interface_node(state: GraphState) -> GraphState:
         search_filters=search_filters,
         next_node=next_node
     )
-
 @traceable()
 def query_processing_with_speaker(state: GraphState) -> GraphState:
     query = state['question']
