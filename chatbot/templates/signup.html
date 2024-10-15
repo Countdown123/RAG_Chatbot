@@ -10,20 +10,52 @@
   <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Noto+Sans:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.4);
+    }
+    .modal-content {
+      background-color: #fefefe;
+      margin: 15% auto;
+      padding: 20px;
+      border: 1px solid #888;
+      width: 300px;
+      text-align: center;
+      border-radius: 5px;
+    }
+    .close {
+      color: #aaa;
+      float: right;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .close:hover,
+    .close:focus {
+      color: black;
+      text-decoration: none;
+      cursor: pointer;
+    }
+  </style>
 </head>
 
 <body>
   <div class="container">
-    <!-- 왼쪽 그라데이션 섹션 -->
     <div class="left-section">
       <img src="/static/dog_footprints.png" alt="Retriever Image" class="retriever-image">
-      <h2>Join Retriever Today!</h2>
+      <h2>Join RetrieveR Today!</h2>
     </div>
 
-    <!-- 오른쪽 회원가입 폼 섹션 -->
     <div class="right-section">
       <h2>Sign Up</h2>
-      <p>Create an account by filling in the information below.</p>
       <form id="signupForm">
         <label for="email" id="label-email">Email</label>
         <input type="email" name="email" id="email" required placeholder="username@email.com">
@@ -41,9 +73,35 @@
     </div>
   </div>
 
+  <!-- Modal -->
+  <div id="errorModal" class="modal">
+    <div class="modal-content">
+      <span class="close">&times;</span>
+      <p id="modalMessage"></p>
+    </div>
+  </div>
+
   <script>
     document.addEventListener("DOMContentLoaded", function () {
       var signupForm = document.getElementById("signupForm");
+      var modal = document.getElementById("errorModal");
+      var closeBtn = document.getElementsByClassName("close")[0];
+      var modalMessage = document.getElementById("modalMessage");
+
+      function showModal(message) {
+        modalMessage.textContent = message;
+        modal.style.display = "block";
+      }
+
+      closeBtn.onclick = function() {
+        modal.style.display = "none";
+      }
+
+      window.onclick = function(event) {
+        if (event.target == modal) {
+          modal.style.display = "none";
+        }
+      }
 
       signupForm.addEventListener("submit", async function (event) {
         event.preventDefault();
@@ -52,9 +110,8 @@
         var password = document.getElementById("password").value.trim();
         var confirmPassword = document.getElementById("confirm-password").value.trim();
 
-        // 비밀번호 확인
         if (password !== confirmPassword) {
-          alert("Passwords do not match.");
+          showModal("Passwords do not match.");
           return;
         }
 
@@ -70,16 +127,18 @@
           });
 
           if (response.ok) {
-            alert("Registration successful! Please log in.");
-            window.location.href = "/login.html";
+            showModal("Registration successful! Please log in.");
+            setTimeout(() => {
+              window.location.href = "/login.html";
+            }, 2000);
           } else {
             const data = await response.json();
             console.error("Error Details:", data);
-            alert("Error: " + (data.detail || 'Registration failed.'));
+            showModal("Error: " + (data.detail || 'Registration failed.'));
           }
         } catch (error) {
           console.error("Error during registration:", error);
-          alert("An error occurred. Please try again later.");
+          showModal("An error occurred. Please try again later.");
         }
       });
     });
