@@ -802,7 +802,6 @@ async def get_metadata(
     db: Session = Depends(get_db),
 ):
     try:
-        # 파일 메타데이터를 조회
         metadata_record = (
             db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
         )
@@ -812,7 +811,6 @@ async def get_metadata(
                 status_code=404, detail=f"Metadata not found for file ID: {file_id}"
             )
         
-        # 파일 기록을 조회
         file_record = db.query(FileModel).filter(FileModel.id == file_id).first()
         if not file_record:
             logger.error(f"File record not found for file ID: {file_id}")
@@ -820,20 +818,13 @@ async def get_metadata(
                 status_code=404, detail=f"File record not found for file ID: {file_id}"
             )
         
-        logger.info(f"Metadata record: {metadata_record}")
-        logger.info(f"File record: {file_record}")
-
-        # 메타데이터를 JSON 형태로 변환
         metadata = json.loads(metadata_record.file_metadata)
         file_extension = file_record.filename.split('.')[-1].lower()
         
-        logger.info(f"Full metadata: {metadata}")
-
-        # 'metadata' 키 내부에서 파일명으로 메타데이터 접근 (대소문자 구분 없이, 확장자는 소문자로)
         file_metadata = None
         search_filename = file_record.filename.lower()
         if search_filename.endswith('.pdf'):
-            search_filename = search_filename[:-4] + '.pdf'  # 확장자를 소문자로 변경
+            search_filename = search_filename[:-4] + '.pdf'  
         
         for key, value in metadata.get('metadata', {}).items():
             if key.lower() == search_filename:
@@ -846,17 +837,17 @@ async def get_metadata(
 
         logger.info(f"File metadata: {file_metadata}")
 
-        # PDF 파일에 대한 메타데이터 처리
         if file_extension.lower() == 'pdf':
-            # 메타데이터를 변환하여 반환
             transformed_metadata = {
                 "파일명": file_record.filename,
-                "발언자": ", ".join(file_metadata.get('speakers', [])),
                 "총 페이지": file_metadata.get('max_pages', 'N/A'),
-                "인덱스 이름": metadata.get('index_name', '')  # 'index_name'은 전체 메타데이터에서 가져옴
+                "인덱스 이름": metadata.get('index_name', '')  
             }
 
-            # 추가 메타데이터 처리
+            speakers = file_metadata.get('speakers', [])
+            if speakers:
+                transformed_metadata["발언자"] = ", ".join(speakers)
+
             for key, value in file_metadata.items():
                 if key not in ['speakers', 'max_pages']:
                     transformed_metadata[key] = value
@@ -864,7 +855,6 @@ async def get_metadata(
             logger.info(f"Transformed metadata: {transformed_metadata}")
             return {"metadata": transformed_metadata}
 
-        # PDF 외의 파일에 대한 메타데이터 처리
         else:
             logger.info(f"Non-PDF metadata: {file_metadata}")
             return {"metadata": file_metadata}
@@ -872,6 +862,7 @@ async def get_metadata(
     except Exception as e:
         logger.error(f"Error fetching metadata for file ID: {file_id}, error: {str(e)}")
         raise HTTPException(status_code=500, detail="Error fetching metadata. Please try again.")
+
 # Serve HTML pages
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
