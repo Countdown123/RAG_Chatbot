@@ -9,6 +9,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import List, Optional
 from pathlib import Path
+import chardet
 
 from fastapi import (
     FastAPI,
@@ -222,7 +223,6 @@ def save_uploaded_file(user_id: int, chat_id: str, file: UploadFile) -> str:
 
     logger.info(f"File {filename} saved successfully to {file_path}")
     return str(file_path)
-
 
 
 # Routes
@@ -735,8 +735,12 @@ async def get_file_data(
         try:
             if extension in ["xlsx", "xls"]:
                 df = pd.read_excel(filepath)
-            else:  # csv
-                df = pd.read_csv(filepath)
+            elif extension in ["csv"]:  # csv
+                with open(filepath, "rb") as f:
+                    raw_data = f.read()
+                result = chardet.detect(raw_data)
+                encoding = result["encoding"]
+                df = pd.read_csv(filepath, encoding=encoding)
 
             # Replace infinite values with NaN
             df.replace([np.inf, -np.inf], np.nan, inplace=True)
