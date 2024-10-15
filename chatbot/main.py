@@ -398,13 +398,13 @@ async def websocket_endpoint(websocket: WebSocket):
                                                     db=index_name,
                                                     search_filters=[],
                                                     next_node="chat_interface",
-                                                    metadata=file_metadata.get('metadata', {})  # 여기에 메타데이터 추가
+                                                    metadata=file_metadata.get('metadata', {})  
 
                                                 )
                                             else:
                                                 graph_state.question = data
                                                 graph_state.next_node = "chat_interface"
-                                                graph_state.metadata = file_metadata.get('metadata', {})  # 메타데이터 업데이트
+                                                graph_state.metadata = file_metadata.get('metadata', {})  #
 
                                                 logger.info(f"Updated graph state: {graph_state}")
 
@@ -826,33 +826,52 @@ async def get_metadata(
         # 메타데이터를 JSON 형태로 변환
         metadata = json.loads(metadata_record.file_metadata)
         file_extension = file_record.filename.split('.')[-1].lower()
+        
+        logger.info(f"Full metadata: {metadata}")
+
+        # 'metadata' 키 내부에서 파일명으로 메타데이터 접근 (대소문자 구분 없이, 확장자는 소문자로)
+        file_metadata = None
+        search_filename = file_record.filename.lower()
+        if search_filename.endswith('.pdf'):
+            search_filename = search_filename[:-4] + '.pdf'  # 확장자를 소문자로 변경
+        
+        for key, value in metadata.get('metadata', {}).items():
+            if key.lower() == search_filename:
+                file_metadata = value
+                break
+        
+        if file_metadata is None:
+            logger.error(f"File metadata not found for filename: {file_record.filename}")
+            file_metadata = {}
+
+        logger.info(f"File metadata: {file_metadata}")
 
         # PDF 파일에 대한 메타데이터 처리
-        if file_extension == 'pdf':
+        if file_extension.lower() == 'pdf':
             # 메타데이터를 변환하여 반환
             transformed_metadata = {
                 "파일명": file_record.filename,
-                "발언자": ", ".join(metadata.get('metadata', {}).get('speakers', [])),
-                "총 페이지": metadata.get('max_pages', 'N/A'),
-                "인덱스 이름": metadata.get('index_name', '')  # 기존 'index_name'을 '인덱스 이름'으로 표시
+                "발언자": ", ".join(file_metadata.get('speakers', [])),
+                "총 페이지": file_metadata.get('max_pages', 'N/A'),
+                "인덱스 이름": metadata.get('index_name', '')  # 'index_name'은 전체 메타데이터에서 가져옴
             }
 
             # 추가 메타데이터 처리
-            for key, value in metadata.get('metadata', {}).items():
-                if key not in ['speakers', 'file_names', 'max_pages']:
+            for key, value in file_metadata.items():
+                if key not in ['speakers', 'max_pages']:
                     transformed_metadata[key] = value
 
+            logger.info(f"Transformed metadata: {transformed_metadata}")
             return {"metadata": transformed_metadata}
 
         # PDF 외의 파일에 대한 메타데이터 처리
         else:
-            return {"metadata": metadata}
+            logger.info(f"Non-PDF metadata: {file_metadata}")
+            return {"metadata": file_metadata}
 
     except Exception as e:
         logger.error(f"Error fetching metadata for file ID: {file_id}, error: {str(e)}")
         raise HTTPException(status_code=500, detail="Error fetching metadata. Please try again.")
-
-
 # Serve HTML pages
 @app.get("/", response_class=HTMLResponse)
 async def read_root():

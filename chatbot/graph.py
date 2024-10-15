@@ -137,25 +137,20 @@ def data_input_node(state: GraphState) -> GraphState:
 def pdf_processing_with_speaker(state: GraphState) -> GraphState:
     print("발언자가 있는 PDF입니다")
     all_documents = []
-    max_pages = 0
-    
-    file_names = []
-    speakers = set()
-    metadata = {
-        "file_names": [],
-        "speakers": [],
-        "max_pages": 0
-    }
+    metadata = {}
     
     counter = 0
 
     for pdf_path in state['file_paths']:
         documents = []
         file_name = os.path.basename(pdf_path)
-        file_names.append(file_name)
+        file_metadata = {
+            "max_pages": 0,
+            "speakers": set()
+        }
+        
         with pdfplumber.open(pdf_path) as pdf:
-            page_count = len(pdf.pages)
-            max_pages = max(max_pages, page_count)
+            file_metadata["max_pages"] = len(pdf.pages)
             for i, page in enumerate(pdf.pages):
                 text = page.extract_text()
                 if text:
@@ -180,7 +175,7 @@ def pdf_processing_with_speaker(state: GraphState) -> GraphState:
                                 counter += 1
 
                             current_speaker = speaker_match.group(1).strip()
-                            speakers.add(current_speaker)
+                            file_metadata["speakers"].add(current_speaker)
                             content = line[speaker_match.end():].strip() + "\n"
                         else:
                             content += line + "\n"
@@ -199,14 +194,11 @@ def pdf_processing_with_speaker(state: GraphState) -> GraphState:
                         counter += 1
 
         all_documents.extend(documents)
-
-    metadata["file_names"] = list(set(file_names))
-    metadata["speakers"] = list(speakers)
-    metadata["max_pages"] = max_pages
+        file_metadata["speakers"] = list(file_metadata["speakers"])
+        metadata[file_name] = file_metadata
 
     return GraphState(
         processed_data=all_documents,
-        max_pages=max_pages,
         pdfs_loaded=True,
         metadata=metadata
     )
@@ -215,23 +207,20 @@ def pdf_processing_without_speaker(state: GraphState) -> GraphState:
     print("발언자가 없는 PDF입니다")
 
     all_documents = []
-    max_pages = 0
-    
-    file_names = []
-    metadata = {
-        "file_names": [],
-        "max_pages": 0
-    }
+    metadata = {}
     
     counter = 0
 
     for pdf_path in state['file_paths']:
         documents = []
         file_name = os.path.basename(pdf_path)
-        file_names.append(file_name)
+        file_metadata = {
+            "max_pages": 0,
+            "speakers": []
+        }
+        
         with pdfplumber.open(pdf_path) as pdf:
-            page_count = len(pdf.pages)
-            max_pages = max(max_pages, page_count)
+            file_metadata["max_pages"] = len(pdf.pages)
             for i, page in enumerate(pdf.pages):
                 text = page.extract_text()
                 if text:
@@ -247,13 +236,10 @@ def pdf_processing_without_speaker(state: GraphState) -> GraphState:
                     counter += 1
 
         all_documents.extend(documents)
-
-    metadata["file_names"] = list(set(file_names))
-    metadata["max_pages"] = max_pages
+        metadata[file_name] = file_metadata
 
     return GraphState(
         processed_data=all_documents,
-        max_pages=max_pages,
         pdfs_loaded=True,
         metadata=metadata
     )
@@ -325,7 +311,14 @@ def vector_storage_node(state: GraphState) -> GraphState:
 
 def chat_interface_node(state: GraphState) -> GraphState:
     query = state['question']
-    metadata = state.get('metadata', {})
+    new_metadata = state.get('metadata', {})
+
+    # 새 메타데이터 구조를 이전 구조로 변환
+    old_metadata = {
+        "file_names": list(new_metadata.keys()),
+        "speakers": list(set(speaker for file_info in new_metadata.values() for speaker in file_info["speakers"])),
+        "max_pages": max(file_info["max_pages"] for file_info in new_metadata.values())
+    }
 
     # 질문 분석 및 필터 생성
     analysis_prompt = f"""
@@ -353,14 +346,14 @@ def chat_interface_node(state: GraphState) -> GraphState:
     specific_files = []
     specific_pages = []
     specific_speakers = []
-    speaker_list = metadata.get('speakers', [])  # 여기서 speaker_list를 초기화합니다.
+    speaker_list = old_metadata.get('speakers', [])  # 여기서 speaker_list를 초기화합니다.
 
     for line in analysis_result.split('\n'):
         print(f"분석된 라인: {line}")
         if line.startswith('파일명:'):
             files = line.split(':')[1].strip()
             if files != '없음':
-                file_list = metadata.get('file_names', [])
+                file_list = old_metadata.get('file_names', [])
                 most_similar_file = find_most_similar_item(files, file_list)
                 if most_similar_file:
                     specific_files = [most_similar_file]
@@ -375,13 +368,13 @@ def chat_interface_node(state: GraphState) -> GraphState:
         elif line.startswith('발언자:'):
             speakers = line.split(':')[1].strip()
             if speakers != '없음':
-                speaker_list = metadata.get('speakers', [])
+                speaker_list = old_metadata.get('speakers', [])
                 most_similar_speaker = find_most_similar_speaker(speakers, speaker_list)
                 if most_similar_speaker:
                     specific_speakers = [most_similar_speaker]
             logger.info(f"Query: {speakers}")
             logger.info(f"메타데이터에서 매칭된 발언자: {specific_speakers}")
-    all_files = metadata.get('file_names', [])
+    all_files = old_metadata.get('file_names', [])
     
     search_filters = []
     if specific_files:
