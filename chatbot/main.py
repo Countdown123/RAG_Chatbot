@@ -187,20 +187,42 @@ def load_chat_history_from_file(user_id: int, chat_id: str) -> List[dict]:
         messages = json.load(f)
     return messages
 
-
 def save_uploaded_file(user_id: int, chat_id: str, file: UploadFile) -> str:
     """
     Saves the uploaded file to the appropriate chat directory and returns the file path.
+    Ensures the extension is lowercase '.pdf' regardless of the original case.
     """
     chat_dir = get_chat_directory(user_id, chat_id)
     files_dir = chat_dir / "files"
     files_dir.mkdir(parents=True, exist_ok=True)  # Ensure files directory exists
-    file_path = files_dir / file.filename
+
+    # Normalize the filename for PDF files
+    filename = file.filename
+    name, ext = os.path.splitext(filename)
+    if ext.lower() == '.pdf':  # PDF 확장자를 대소문자 관계없이 처리
+        filename = name + '.pdf'  # 확장자를 소문자 .pdf로 변환
+
+    file_path = files_dir / filename
+    logger.info(f"Saving file to path: {file_path}")
+
+    # Read the file content
+    content = file.file.read()
+
+    # Check if the file content is empty
+    if len(content) == 0:
+        logger.error(f"File {filename} is empty, possibly an invalid upload.")
+        raise HTTPException(status_code=400, detail=f"Uploaded file {filename} is empty.")
+
+    # Save the file if it has valid content
     with open(file_path, "wb") as f:
-        content = file.file.read()
         f.write(content)
-    logger.info(f"File {file.filename} saved to {file_path}")
+
+    # 파일 포인터를 처음으로 되돌려서 이후에도 사용할 수 있게 함
+    file.file.seek(0)  # 포인터를 처음으로 돌림
+
+    logger.info(f"File {filename} saved successfully to {file_path}")
     return str(file_path)
+
 
 
 # Routes
@@ -365,7 +387,6 @@ async def websocket_endpoint(websocket: WebSocket):
                                         file_metadata = json.loads(metadata_record.file_metadata)
                                         index_name = file_metadata.get('index_name')
                                         logger.info(f"index_name 값: {index_name}")
-                                        logger.info(f"Full metadata for file: {json.dumps(file_metadata, indent=2)}")
 
                                         if not index_name:
                                             raise HTTPException(status_code=400, detail="Pinecone index name is missing.")
@@ -380,7 +401,6 @@ async def websocket_endpoint(websocket: WebSocket):
                                                     metadata=file_metadata.get('metadata', {})  # 여기에 메타데이터 추가
 
                                                 )
-                                                logger.info(f"New graph state created: {graph_state}")
                                             else:
                                                 graph_state.question = data
                                                 graph_state.next_node = "chat_interface"
@@ -388,7 +408,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
                                                 logger.info(f"Updated graph state: {graph_state}")
 
-                                            logger.info(f"Processing query with graph state: {graph_state}")
                                             result = process_query(graph_state)
                                             
                                             answer = result.get("answer", "")
@@ -517,128 +536,145 @@ async def upload_file(
         # If PDF files are already uploaded, prevent uploading CSV/XLSX files
         raise HTTPException(status_code=400, detail="Cannot upload a CSV/XLSX file when PDF files are already uploaded in this chat.")
 
-    # Enforce the limits
-    if existing_pdf_count + uploading_pdf_count > 5:
-        raise HTTPException(status_code=400, detail="You can upload a maximum of 5 PDF files per chat.")
-    if existing_csv_xlsx_count + uploading_csv_xlsx_count > 1:
-        raise HTTPException(status_code=400, detail="You can upload a maximum of 1 CSV/XLSX file per chat.")
-
-    # Proceed with uploading files
+    pdf_file_paths = []
     file_list = []
 
+    async def process_pdf(file):
+        try:
+            # Save the uploaded PDF file
+            file_path = save_uploaded_file(current_user.id, chat_id, file)
+            pdf_file_paths.append(file_path)
+            logger.info(f"PDF file path added: {file_path}")
+
+            # Create a new File record in the database
+            db_file = FileModel(
+                filename=file.filename,
+                filepath=file_path,
+                upload_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                user_id=current_user.id,
+                chat_id=chat_id,
+            )
+            db.add(db_file)
+            db.commit()
+            db.refresh(db_file)
+            file_list.append({"id": db_file.id, "filename": db_file.filename, "upload_time": db_file.upload_time})
+
+        except Exception as e:
+            logger.error(f"Error saving PDF file: {e}")
+            raise HTTPException(status_code=500, detail="Failed to save PDF file.")
+
+    # 비동기로 PDF 파일 처리
+    tasks = [process_pdf(file) for file in files if file.filename.split(".")[-1].lower() == "pdf"]
+    await asyncio.gather(*tasks)
+
+    # CSV/XLSX 파일 처리
     for file in files:
         filename = file.filename
         extension = filename.split(".")[-1].lower()
 
-        # Save the uploaded file to the chat's files directory
-        try:
-            file_path = save_uploaded_file(current_user.id, chat_id, file)
-            
-        except Exception as e:
-            logger.error(f"Error saving uploaded file: {e}")
-            raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
-
-        # Create a new File record in the database
-        db_file = FileModel(
-            filename=filename,
-            filepath=file_path,
-            upload_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            user_id=current_user.id,
-            chat_id=chat_id,
-        )
-        try:
-            db.add(db_file)
-            db.commit()
-            db.refresh(db_file)
-        except Exception as e:
-            logger.error(f"Error saving file to database: {e}")
-            raise HTTPException(
-                status_code=500, detail="Failed to save file information."
-            )
-
-        # Process the file based on its type
         if extension in ["xlsx", "xls", "csv"]:
             try:
-                sanitized_filename = "".join(
-                    e for e in filename if e.isalnum() or e in [".", "_"]
+                # Save the uploaded CSV/XLSX file
+                file_path = save_uploaded_file(current_user.id, chat_id, file)
+                logger.debug(f"File {filename} saved to {file_path}")
+
+                # Create a new File record in the database
+                db_file = FileModel(
+                    filename=filename,
+                    filepath=file_path,
+                    upload_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    user_id=current_user.id,
+                    chat_id=chat_id,
                 )
-                sql_chatbot = SQLChatbot(file_path, sanitized_filename)
-            except ValueError as e:
-                logger.error(f"Error initializing SQLChatbot: {str(e)}")
-                raise HTTPException(status_code=400, detail=str(e))
+                db.add(db_file)
+                db.commit()
+                db.refresh(db_file)
+                file_list.append({"id": db_file.id, "filename": db_file.filename, "upload_time": db_file.upload_time})
+
+                # Process the file based on its type (for CSV/XLSX)
+                if extension in ["xlsx", "xls", "csv"]:
+                    try:
+                        sanitized_filename = "".join(
+                            e for e in filename if e.isalnum() or e in [".", "_"]
+                        )
+                        sql_chatbot = SQLChatbot(file_path, sanitized_filename)
+                        logger.debug(f"SQLChatbot initialized for {filename}")
+                    except ValueError as e:
+                        logger.error(f"Error initializing SQLChatbot: {str(e)}")
+                        raise HTTPException(status_code=400, detail=str(e))
+                    except Exception as e:
+                        logger.error(f"Unexpected error initializing SQLChatbot: {str(e)}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail="An unexpected error occurred while processing the file.",
+                        )
+
             except Exception as e:
-                logger.error(f"Unexpected error initializing SQLChatbot: {str(e)}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="An unexpected error occurred while processing the file.",
-                )
-        
-        elif extension == "pdf":
-            try:
-                file_processing_app = create_file_processing_workflow()
-                
-                state = GraphState(
-                    file_paths=[file_path],
-                    question="",
-                    answer="",
-                    verification_result=False,
-                    page_numbers=[],
-                    db="",
-                    pdfs_loaded=True,
-                    verification_count=0,
-                    excluded_pages=set(),
-                    next_question=True,
-                    file_types=[extension],
-                    next_node="",
-                    processed_data="",
-                    max_pages=0,
-                    metadata={"file_names": [], "speakers": [], "max_pages": 0}
-                )
+                logger.error(f"Error saving uploaded CSV/XLSX file: {e}")
+                raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
 
-                for output in file_processing_app.stream(state):
-                    current_node = next(iter(output))
-                    new_state = output[current_node]
+    # Process all PDF files together after upload
+    if pdf_file_paths:
+        logger.info(f"Processing {len(pdf_file_paths)} PDF files")
+        try:
+            file_processing_app = create_file_processing_workflow()
+            
+            initial_state = GraphState(
+                file_paths=pdf_file_paths,
+                question="",
+                answer="",
+                verification_result=False,
+                page_numbers=[],
+                db="",
+                pdfs_loaded=False,
+                verification_count=0,
+                excluded_pages=set(),
+                next_question=True,
+                file_types=['pdf'] * len(pdf_file_paths),
+                next_node="",
+                processed_data="",
+                max_pages=0,
+                metadata={"file_names": [], "speakers": [], "max_pages": 0}
+            )
 
-                    if isinstance(new_state, dict):
-                        logger.debug(f"New state from {current_node}: {new_state}")
-                        state.update(new_state)
-                    else:
-                        raise ValueError(f"Unexpected result type from processing node: {type(new_state)}")
+            for output in file_processing_app.stream(initial_state):
+                current_node = next(iter(output))
+                new_state = output[current_node]
 
-                    if current_node == "vector_storage" and 'db' in state:
-                        logger.debug("Vector storage completed")
-                        break
-                    elif 'db' not in state:
-                        raise ValueError("db field is missing in the state object")
+                if isinstance(new_state, dict):
+                    initial_state.update(new_state)
+                else:
+                    raise ValueError(f"Unexpected result type from processing node: {type(new_state)}")
 
-                logger.info(f"PDF file processed and vectors stored for {filename}")
+                if current_node == "vector_storage" and 'db' in initial_state:
+                    logger.info("Vector storage completed")
+                    break
 
-                result = {
-                    "index_name": state.get("db", ""),
-                    "max_pages": state.get("max_pages", 0),
-                    "metadata": state.get("metadata", {}),
-                }
+            logger.info(f"PDF files processed and vectors stored")
 
+            result = {
+                "index_name": initial_state.get("db", ""),
+                "max_pages": initial_state.get("max_pages", 0),
+                "metadata": initial_state.get("metadata", {}),
+            }
+
+            # Save metadata for all processed PDF files
+            for db_file in db.query(FileModel).filter(FileModel.chat_id == chat_id, FileModel.filename.like('%.pdf')).all():
                 new_metadata = FileMetadata(
                     file_id=db_file.id,
                     chat_id=chat_id,
                     file_metadata=json.dumps(result)
                 )
                 db.add(new_metadata)
-                db.commit()
-                logger.info(f"PDF metadata saved to database for file ID: {db_file.id}")
-                logger.info(f"Metadata content: {json.dumps(result, indent=2)}")
+            db.commit()
+            logger.info(f"PDF metadata saved to database for chat ID: {chat_id}")
 
-            except Exception as e:
-                logger.error(f"Error processing PDF file: {str(e)}")
-                raise HTTPException(status_code=500, detail="Failed to process PDF file.")
+        except Exception as e:
+            logger.error(f"Error processing PDF files: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to process PDF files.")
 
-        # 파일 리스트에 추가
-        file_list.append({"id": db_file.id, "filename": db_file.filename, "upload_time": db_file.upload_time})
-
-    # 최종적으로 클라이언트로 응답 반환
     logger.info(f"File upload completed. File list: {file_list}")
-    return {"fileList": file_list, "message": "File processed successfully"}
+    return {"fileList": file_list, "message": "Files processed successfully"}
 
 
 @app.get("/files/")
@@ -811,8 +847,6 @@ async def get_metadata(
     except Exception as e:
         logger.error(f"Error fetching metadata for file ID: {file_id}, error: {str(e)}")
         raise HTTPException(status_code=500, detail="Error fetching metadata. Please try again.")
-
-
 
 
 # Serve HTML pages

@@ -82,53 +82,54 @@ class GraphState(TypedDict):
 def data_input_node(state: GraphState) -> GraphState:
     file_paths = state['file_paths']
     
+    logging.info(f"Received file paths: {file_paths}")
+    
     if not file_paths:
+        logging.error("서버에서 제공된 파일 경로가 없습니다.")
         raise ValueError("서버에서 제공된 파일 경로가 없습니다.")
     
     valid_paths = []
-    file_types = []
     has_speaker = False
     
     for file_path in file_paths:
+        logging.info(f"Processing file: {file_path}")
         if not os.path.exists(file_path):
-            print(f"유효하지 않은 파일 경로입니다: {file_path}")
+            logging.warning(f"유효하지 않은 파일 경로입니다: {file_path}")
             continue
 
-        file_extension = os.path.splitext(file_path)[1].lower()
-        
-        if file_extension == '.pdf':
+        _, file_extension = os.path.splitext(file_path)
+        if file_extension.lower() == '.pdf':
+            logging.info(f"Valid PDF file found: {file_path}")
             valid_paths.append(file_path)
-            file_types.append('pdf')
             
-            # Check if the PDF contains speaker information
-            with pdfplumber.open(file_path) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if text:
-                        lines = text.split('\n')
-                        for line in lines:
-                            if re.match(r"^◯\s*(\S+\s\S+)(\s|$)", line):
-                                has_speaker = True
-                                break
-                    if has_speaker:
-                        break
-                if has_speaker:
-                    break
+            try:
+                with pdfplumber.open(file_path) as pdf:
+                    for page_num, page in enumerate(pdf.pages):
+                        text = page.extract_text()
+                        if text and re.search(r"^◯\s*(\S+\s\S+)(\s|$)", text, re.MULTILINE):
+                            has_speaker = True
+                            logging.info(f"Speaker found in file {file_path} on page {page_num + 1}")
+                            break  # 현재 파일에서 발언자를 찾았으므로 페이지 검색 중단
+            except Exception as e:
+                logging.error(f"PDF 파일 '{file_path}' 처리 중 오류 발생: {str(e)}")
         else:
-            print(f"지원되지 않는 파일 형식입니다: {file_extension}")
+            logging.warning(f"지원되지 않는 파일 형식입니다: {file_path}")
+
 
     if not valid_paths:
+        logging.error("처리할 수 있는 유효한 PDF 파일이 없습니다.")
         raise ValueError("처리할 수 있는 유효한 PDF 파일이 없습니다.")
 
-    print(f"{len(valid_paths)}개의 유효한 PDF 파일이 처리를 위해 준비되었습니다.")
+    logging.info(f"{len(valid_paths)}개의 유효한 PDF 파일이 처리를 위해 준비되었습니다.")
     for path in valid_paths:
-        print(f"- {path}")
+        logging.info(f"- {path}")
     
     next_node = 'pdf_processing_with_speaker' if has_speaker else 'pdf_processing_without_speaker'
+    logging.info(f"Next node: {next_node}")
     
     return GraphState(
         file_paths=valid_paths,
-        file_types=file_types,
+        file_types=['pdf'] * len(valid_paths),
         pdfs_loaded=False,
         next_node=next_node
     )
@@ -379,7 +380,6 @@ def chat_interface_node(state: GraphState) -> GraphState:
                 if most_similar_speaker:
                     specific_speakers = [most_similar_speaker]
             logger.info(f"Query: {speakers}")
-            logger.info(f"Speaker list: {speaker_list}")
             logger.info(f"메타데이터에서 매칭된 발언자: {specific_speakers}")
     all_files = metadata.get('file_names', [])
     
@@ -904,6 +904,7 @@ def should_continue(state: GraphState) -> bool:
 def should_end(state: GraphState) -> bool:
     return state.get('next_question', False) or state['question'] == "" or state.get('completed', False)
 
+
 def create_file_processing_workflow():
     workflow = StateGraph(GraphState)
     
@@ -936,8 +937,8 @@ def create_file_processing_workflow():
     )
 
     workflow.set_entry_point("data_input")
+    logger.debug("File processing workflow created")
     return workflow.compile()
-
 def create_qa_workflow():
     workflow = StateGraph(GraphState)
     
