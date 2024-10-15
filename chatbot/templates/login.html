@@ -75,38 +75,6 @@
       <p>Incorrect email or password. Please try again.</p>
     </div>
   </div>
-
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      const loginForm = document.getElementById('loginForm');
-      const modal = document.getElementById('errorModal');
-      const closeBtn = document.getElementsByClassName('close')[0];
-
-      loginForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        const email = document.getElementById('email').value;
-        const password = document.getElementById('password').value;
-
-        // Here you would normally send a request to your server to validate the credentials
-        // For this example, we'll just check if the email is "test@example.com" and password is "password"
-        if (email === 'test@example.com' && password === 'password') {
-          alert('Login successful!');
-          // Redirect to dashboard or home page
-        } else {
-          modal.style.display = 'block';
-        }
-      });
-
-      closeBtn.onclick = function() {
-        modal.style.display = 'none';
-      }
-
-      window.onclick = function(event) {
-        if (event.target == modal) {
-          modal.style.display = 'none';
-        }
-      }
-    });
-  </script>
+  <script src="/static/login.js"></script>
 </body>
 </html>
