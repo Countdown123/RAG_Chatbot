@@ -1,4 +1,3 @@
-
 from sqlalchemy.orm import Session
 from database import get_db
 
@@ -19,9 +18,8 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-app = APIRouter(
-  prefix="/user"
-)
+app = APIRouter(prefix="/user")
+
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
@@ -35,12 +33,14 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
 
 
 @app.post(path="/signup")
-async def signup(new_user: user_schema.NewUserForm, db: Session = Depends(get_db)):    
+async def signup(new_user: user_schema.NewUserForm, db: Session = Depends(get_db)):
     # 회원 존재 여부 확인
     user = user_crud.get_user(new_user.user_name, db)
 
     if user:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="User already exists"
+        )
 
     # 회원 가입
     user_crud.create_user(new_user, db)
@@ -49,25 +49,40 @@ async def signup(new_user: user_schema.NewUserForm, db: Session = Depends(get_db
 
 
 @app.post(path="/login")
-async def login(response: Response, login_form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login(
+    response: Response,
+    login_form: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
     # 회원 존재 여부 확인
     user = user_crud.get_user(login_form.username, db)
 
     if not user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user or password")
-    
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user or password"
+        )
+
     # 로그인
     res = user_crud.verify_password(login_form.password, user.user_pw)
 
     # 토큰 생성
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(data={"sub": user.user_name}, expires_delta=access_token_expires)
+    access_token = create_access_token(
+        data={"sub": user.user_name}, expires_delta=access_token_expires
+    )
 
     # 쿠키에 저장
-    response.set_cookie(key="access_token", value=access_token, expires=access_token_expires, httponly=True)
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        expires=access_token_expires,
+        httponly=True,
+    )
 
     if not res:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user or password")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user or password"
+        )
 
     return user_schema.Token(access_token=access_token, token_type="bearer")
 

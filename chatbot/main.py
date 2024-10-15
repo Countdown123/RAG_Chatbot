@@ -429,14 +429,14 @@ async def websocket_endpoint(websocket: WebSocket):
                                                     next_node="chat_interface",
                                                     metadata=file_metadata.get(
                                                         "metadata", {}
-                                                    ),  # 여기에 메타데이터 추가
+                                                    ),
                                                 )
                                             else:
                                                 graph_state.question = data
                                                 graph_state.next_node = "chat_interface"
                                                 graph_state.metadata = (
                                                     file_metadata.get("metadata", {})
-                                                )  # 메타데이터 업데이트
+                                                )  #
 
                                                 logger.info(
                                                     f"Updated graph state: {graph_state}"
@@ -887,7 +887,6 @@ async def get_metadata(
     db: Session = Depends(get_db),
 ):
     try:
-        # 파일 메타데이터를 조회
         metadata_record = (
             db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
         )
@@ -897,7 +896,6 @@ async def get_metadata(
                 status_code=404, detail=f"Metadata not found for file ID: {file_id}"
             )
 
-        # 파일 기록을 조회
         file_record = db.query(FileModel).filter(FileModel.id == file_id).first()
         if not file_record:
             logger.error(f"File record not found for file ID: {file_id}")
@@ -905,35 +903,48 @@ async def get_metadata(
                 status_code=404, detail=f"File record not found for file ID: {file_id}"
             )
 
-        logger.info(f"Metadata record: {metadata_record}")
-        logger.info(f"File record: {file_record}")
-
-        # 메타데이터를 JSON 형태로 변환
         metadata = json.loads(metadata_record.file_metadata)
         file_extension = file_record.filename.split(".")[-1].lower()
 
-        # PDF 파일에 대한 메타데이터 처리
-        if file_extension == "pdf":
-            # 메타데이터를 변환하여 반환
+        file_metadata = None
+        search_filename = file_record.filename.lower()
+        if search_filename.endswith(".pdf"):
+            search_filename = search_filename[:-4] + ".pdf"
+
+        for key, value in metadata.get("metadata", {}).items():
+            if key.lower() == search_filename:
+                file_metadata = value
+                break
+
+        if file_metadata is None:
+            logger.error(
+                f"File metadata not found for filename: {file_record.filename}"
+            )
+            file_metadata = {}
+
+        logger.info(f"File metadata: {file_metadata}")
+
+        if file_extension.lower() == "pdf":
             transformed_metadata = {
                 "파일명": file_record.filename,
-                "발언자": ", ".join(metadata.get("metadata", {}).get("speakers", [])),
-                "총 페이지": metadata.get("max_pages", "N/A"),
-                "인덱스 이름": metadata.get(
-                    "index_name", ""
-                ),  # 기존 'index_name'을 '인덱스 이름'으로 표시
+                "총 페이지": file_metadata.get("max_pages", "N/A"),
+                "인덱스 이름": metadata.get("index_name", ""),
             }
 
-            # 추가 메타데이터 처리
-            for key, value in metadata.get("metadata", {}).items():
-                if key not in ["speakers", "file_names", "max_pages"]:
+            speakers = file_metadata.get("speakers", [])
+            if speakers:
+                transformed_metadata["발언자"] = ", ".join(speakers)
+
+            for key, value in file_metadata.items():
+                if key not in ["speakers", "max_pages"]:
                     transformed_metadata[key] = value
 
+            logger.info(f"Transformed metadata: {transformed_metadata}")
             return {"metadata": transformed_metadata}
 
-        # PDF 외의 파일에 대한 메타데이터 처리
         else:
-            return {"metadata": metadata}
+            logger.info(f"Non-PDF metadata: {file_metadata}")
+            return {"metadata": file_metadata}
 
     except Exception as e:
         logger.error(f"Error fetching metadata for file ID: {file_id}, error: {str(e)}")

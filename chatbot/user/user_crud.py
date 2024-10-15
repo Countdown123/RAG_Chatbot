@@ -11,17 +11,17 @@ def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def get_user(user_name: str, db: Session):  
+def get_user(user_name: str, db: Session):
     return db.query(User).filter(User.user_name == user_name).first()
 
 
 def create_user(new_user: NewUserForm, db: Session):
     user = User(
-        user_name =new_user.user_name,
-        user_pw=pwd_context.hash(new_user.password)
+        user_name=new_user.user_name, user_pw=pwd_context.hash(new_user.password)
     )
     db.add(user)
     db.commit()
+
 
 def get_user(db: Session, email: str):
     return db.query(User).filter(User.email == email).first()
@@ -34,6 +34,7 @@ def create_user(db: Session, user: UserCreate):
     db.commit()
     db.refresh(db_user)
     return db_user
+
 
 def authenticate_user(db: Session, email: str, password: str):
     user = get_user(db, email)

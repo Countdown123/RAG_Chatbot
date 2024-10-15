@@ -34,13 +34,14 @@ logger = logging.getLogger(__name__)
 
 MAX_TOKENS = 110000
 
+
 def find_most_similar_speaker(query, speaker_list, threshold=0.6):
-    query = unicodedata.normalize('NFC', query)
+    query = unicodedata.normalize("NFC", query)
     best_match = None
     highest_ratio = 0
 
     for speaker in speaker_list:
-        normalized_speaker = unicodedata.normalize('NFC', speaker)
+        normalized_speaker = unicodedata.normalize("NFC", speaker)
         ratio = SequenceMatcher(None, query, normalized_speaker).ratio()
         if ratio > highest_ratio:
             highest_ratio = ratio
@@ -49,6 +50,8 @@ def find_most_similar_speaker(query, speaker_list, threshold=0.6):
     if highest_ratio >= threshold:
         return best_match
     return None
+
+
 def find_most_similar_item(query, item_list, threshold=0.6):
     best_match = None
     highest_ratio = 0
@@ -60,6 +63,8 @@ def find_most_similar_item(query, item_list, threshold=0.6):
             best_match = item
 
     return best_match if highest_ratio >= threshold else None
+
+
 class GraphState(TypedDict):
     question: str
     answer: str
@@ -71,26 +76,33 @@ class GraphState(TypedDict):
     verification_count: int
     excluded_pages: Set[int]
     next_question: bool
-    file_types: List[Literal['pdf']]
-    next_node: Literal['pdf_processing_with_speaker', 'pdf_processing_without_speaker', 'query_processing_with_speaker', 'query_processing_with_filter', 'query_processing_without_filter']
+    file_types: List[Literal["pdf"]]
+    next_node: Literal[
+        "pdf_processing_with_speaker",
+        "pdf_processing_without_speaker",
+        "query_processing_with_speaker",
+        "query_processing_with_filter",
+        "query_processing_without_filter",
+    ]
     processed_data: str
     max_pages: int
     metadata: Dict[str, Any]
     completed: bool
     search_filters: List[Dict[str, Any]]
 
+
 def data_input_node(state: GraphState) -> GraphState:
-    file_paths = state['file_paths']
-    
+    file_paths = state["file_paths"]
+
     logging.info(f"Received file paths: {file_paths}")
-    
+
     if not file_paths:
         logging.error("서버에서 제공된 파일 경로가 없습니다.")
         raise ValueError("서버에서 제공된 파일 경로가 없습니다.")
-    
+
     valid_paths = []
     has_speaker = False
-    
+
     for file_path in file_paths:
         logging.info(f"Processing file: {file_path}")
         if not os.path.exists(file_path):
@@ -98,186 +110,175 @@ def data_input_node(state: GraphState) -> GraphState:
             continue
 
         _, file_extension = os.path.splitext(file_path)
-        if file_extension.lower() == '.pdf':
+        if file_extension.lower() == ".pdf":
             logging.info(f"Valid PDF file found: {file_path}")
             valid_paths.append(file_path)
-            
+
             try:
                 with pdfplumber.open(file_path) as pdf:
                     for page_num, page in enumerate(pdf.pages):
                         text = page.extract_text()
-                        if text and re.search(r"^◯\s*(\S+\s\S+)(\s|$)", text, re.MULTILINE):
+                        if text and re.search(
+                            r"^◯\s*(\S+\s\S+)(\s|$)", text, re.MULTILINE
+                        ):
                             has_speaker = True
-                            logging.info(f"Speaker found in file {file_path} on page {page_num + 1}")
+                            logging.info(
+                                f"Speaker found in file {file_path} on page {page_num + 1}"
+                            )
                             break  # 현재 파일에서 발언자를 찾았으므로 페이지 검색 중단
             except Exception as e:
                 logging.error(f"PDF 파일 '{file_path}' 처리 중 오류 발생: {str(e)}")
         else:
             logging.warning(f"지원되지 않는 파일 형식입니다: {file_path}")
 
-
     if not valid_paths:
         logging.error("처리할 수 있는 유효한 PDF 파일이 없습니다.")
         raise ValueError("처리할 수 있는 유효한 PDF 파일이 없습니다.")
 
-    logging.info(f"{len(valid_paths)}개의 유효한 PDF 파일이 처리를 위해 준비되었습니다.")
+    logging.info(
+        f"{len(valid_paths)}개의 유효한 PDF 파일이 처리를 위해 준비되었습니다."
+    )
     for path in valid_paths:
         logging.info(f"- {path}")
-    
-    next_node = 'pdf_processing_with_speaker' if has_speaker else 'pdf_processing_without_speaker'
+
+    next_node = (
+        "pdf_processing_with_speaker"
+        if has_speaker
+        else "pdf_processing_without_speaker"
+    )
     logging.info(f"Next node: {next_node}")
-    
+
     return GraphState(
         file_paths=valid_paths,
-        file_types=['pdf'] * len(valid_paths),
+        file_types=["pdf"] * len(valid_paths),
         pdfs_loaded=False,
-        next_node=next_node
+        next_node=next_node,
     )
+
 
 def pdf_processing_with_speaker(state: GraphState) -> GraphState:
     print("발언자가 있는 PDF입니다")
     all_documents = []
-    max_pages = 0
-    
-    file_names = []
-    speakers = set()
-    metadata = {
-        "file_names": [],
-        "speakers": [],
-        "max_pages": 0
-    }
-    
+    metadata = {}
+
     counter = 0
 
-    for pdf_path in state['file_paths']:
+    for pdf_path in state["file_paths"]:
         documents = []
         file_name = os.path.basename(pdf_path)
-        file_names.append(file_name)
+        file_metadata = {"max_pages": 0, "speakers": set()}
+
         with pdfplumber.open(pdf_path) as pdf:
-            page_count = len(pdf.pages)
-            max_pages = max(max_pages, page_count)
+            file_metadata["max_pages"] = len(pdf.pages)
             for i, page in enumerate(pdf.pages):
                 text = page.extract_text()
                 if text:
-                    lines = text.split('\n')
+                    lines = text.split("\n")
                     content = ""
                     current_speaker = None
                     for line in lines:
                         speaker_match = re.match(r"^◯\s*(\S+\s\S+)(\s|$)", line)
                         if speaker_match:
                             if content:
-                                documents.append(Document(
-                                    page_content=content.strip(),
-                                    metadata={
-                                        "file_name": file_name,
-                                        "page_number": i + 1,
-                                        "speaker": current_speaker or "unknown",
-                                        "type": "speaker_content",
-                                        "order": counter
-                                    }
-                                ))
+                                documents.append(
+                                    Document(
+                                        page_content=content.strip(),
+                                        metadata={
+                                            "file_name": file_name,
+                                            "page_number": i + 1,
+                                            "speaker": current_speaker or "unknown",
+                                            "type": "speaker_content",
+                                            "order": counter,
+                                        },
+                                    )
+                                )
                                 content = ""
                                 counter += 1
 
                             current_speaker = speaker_match.group(1).strip()
-                            speakers.add(current_speaker)
-                            content = line[speaker_match.end():].strip() + "\n"
+                            file_metadata["speakers"].add(current_speaker)
+                            content = line[speaker_match.end() :].strip() + "\n"
                         else:
                             content += line + "\n"
 
                     if content:
-                        documents.append(Document(
-                            page_content=content.strip(),
-                            metadata={
-                                "file_name": file_name,
-                                "page_number": i + 1,
-                                "speaker": current_speaker or "unknown",
-                                "type": "speaker_content",
-                                "order": counter
-                            }
-                        ))
+                        documents.append(
+                            Document(
+                                page_content=content.strip(),
+                                metadata={
+                                    "file_name": file_name,
+                                    "page_number": i + 1,
+                                    "speaker": current_speaker or "unknown",
+                                    "type": "speaker_content",
+                                    "order": counter,
+                                },
+                            )
+                        )
                         counter += 1
 
         all_documents.extend(documents)
+        file_metadata["speakers"] = list(file_metadata["speakers"])
+        metadata[file_name] = file_metadata
 
-    metadata["file_names"] = list(set(file_names))
-    metadata["speakers"] = list(speakers)
-    metadata["max_pages"] = max_pages
+    return GraphState(processed_data=all_documents, pdfs_loaded=True, metadata=metadata)
 
-    return GraphState(
-        processed_data=all_documents,
-        max_pages=max_pages,
-        pdfs_loaded=True,
-        metadata=metadata
-    )
 
 def pdf_processing_without_speaker(state: GraphState) -> GraphState:
     print("발언자가 없는 PDF입니다")
 
     all_documents = []
-    max_pages = 0
-    
-    file_names = []
-    metadata = {
-        "file_names": [],
-        "max_pages": 0
-    }
-    
+    metadata = {}
+
     counter = 0
 
-    for pdf_path in state['file_paths']:
+    for pdf_path in state["file_paths"]:
         documents = []
         file_name = os.path.basename(pdf_path)
-        file_names.append(file_name)
+        file_metadata = {"max_pages": 0, "speakers": []}
+
         with pdfplumber.open(pdf_path) as pdf:
-            page_count = len(pdf.pages)
-            max_pages = max(max_pages, page_count)
+            file_metadata["max_pages"] = len(pdf.pages)
             for i, page in enumerate(pdf.pages):
                 text = page.extract_text()
                 if text:
-                    documents.append(Document(
-                        page_content=text.strip(),
-                        metadata={
-                            "file_name": file_name,
-                            "page_number": i + 1,
-                            "type": "page_content",
-                            "order": counter
-                        }
-                    ))
+                    documents.append(
+                        Document(
+                            page_content=text.strip(),
+                            metadata={
+                                "file_name": file_name,
+                                "page_number": i + 1,
+                                "type": "page_content",
+                                "order": counter,
+                            },
+                        )
+                    )
                     counter += 1
 
         all_documents.extend(documents)
+        metadata[file_name] = file_metadata
 
-    metadata["file_names"] = list(set(file_names))
-    metadata["max_pages"] = max_pages
+    return GraphState(processed_data=all_documents, pdfs_loaded=True, metadata=metadata)
 
-    return GraphState(
-        processed_data=all_documents,
-        max_pages=max_pages,
-        pdfs_loaded=True,
-        metadata=metadata
-    )
 
 def vector_storage_node(state: GraphState) -> GraphState:
     load_dotenv()
     pinecone = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-    file_paths = state['file_paths']
-    processed_data = state['processed_data']
+    file_paths = state["file_paths"]
+    processed_data = state["processed_data"]
 
-    combined_filename = "-".join([os.path.splitext(os.path.basename(path))[0] for path in file_paths])
-    index_name = re.sub(r'[^a-zA-Z0-9-]', '-', combined_filename.lower())
+    combined_filename = "-".join(
+        [os.path.splitext(os.path.basename(path))[0] for path in file_paths]
+    )
+    index_name = re.sub(r"[^a-zA-Z0-9-]", "-", combined_filename.lower())
     index_name = f"doc-{index_name[:40]}"
-    index_name = re.sub(r'-+', '-', index_name).strip('-')
+    index_name = re.sub(r"-+", "-", index_name).strip("-")
 
     if index_name not in pinecone.list_indexes().names():
         pinecone.create_index(
             name=index_name,
             dimension=1536,
-            metric='cosine',
-            spec=ServerlessSpec(
-                cloud='aws',
-                region='us-east-1'
-            )
+            metric="cosine",
+            spec=ServerlessSpec(cloud="aws", region="us-east-1"),
         )
 
     embeddings = OpenAIEmbeddings()
@@ -289,31 +290,26 @@ def vector_storage_node(state: GraphState) -> GraphState:
                 "file_name": doc.metadata.get("file_name", "unknown"),
                 "page_number": doc.metadata.get("page_number", "unknown"),
                 "type": doc.metadata.get("type", "unknown"),
-                "order": doc.metadata.get("order", "unknown")
+                "order": doc.metadata.get("order", "unknown"),
             }
             if "speaker" in doc.metadata:
                 metadata["speaker"] = doc.metadata["speaker"]
-            
-            documents.append(Document(
-                page_content=doc.page_content,
-                metadata=metadata
-            ))
+
+            documents.append(Document(page_content=doc.page_content, metadata=metadata))
         else:
             logger.warning(f"Unexpected document type: {type(doc)}")
 
     try:
         vectorstore = LangchainPinecone.from_documents(
-            documents=documents,
-            embedding=embeddings,
-            index_name=index_name
+            documents=documents, embedding=embeddings, index_name=index_name
         )
 
         return GraphState(
             db=index_name,
-            file_types=['pdf'],
-            max_pages=state.get('max_pages', {}),
-            metadata=state.get('metadata', {}),
-            completed=True  # 처리 완료 플래그 설정
+            file_types=["pdf"],
+            max_pages=state.get("max_pages", {}),
+            metadata=state.get("metadata", {}),
+            completed=True,  # 처리 완료 플래그 설정
         )
     except StopIteration:
         logger.info("Vector storage process completed successfully.")
@@ -321,11 +317,24 @@ def vector_storage_node(state: GraphState) -> GraphState:
     except Exception as e:
         logger.error(f"Error in vector storage: {str(e)}")
         return GraphState(error=str(e), completed=True)
-    
+
 
 def chat_interface_node(state: GraphState) -> GraphState:
-    query = state['question']
-    metadata = state.get('metadata', {})
+    query = state["question"]
+    new_metadata = state.get("metadata", {})
+
+    # 새 메타데이터 구조를 이전 구조로 변환
+    old_metadata = {
+        "file_names": list(new_metadata.keys()),
+        "speakers": list(
+            set(
+                speaker
+                for file_info in new_metadata.values()
+                for speaker in file_info["speakers"]
+            )
+        ),
+        "max_pages": max(file_info["max_pages"] for file_info in new_metadata.values()),
+    }
 
     # 질문 분석 및 필터 생성
     analysis_prompt = f"""
@@ -345,44 +354,45 @@ def chat_interface_node(state: GraphState) -> GraphState:
 
     client = wrap_openai(openai.Client())
     analysis_response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": analysis_prompt}]
+        model="gpt-4", messages=[{"role": "user", "content": analysis_prompt}]
     )
     analysis_result = analysis_response.choices[0].message.content
 
     specific_files = []
     specific_pages = []
     specific_speakers = []
-    speaker_list = metadata.get('speakers', [])  # 여기서 speaker_list를 초기화합니다.
+    speaker_list = old_metadata.get(
+        "speakers", []
+    )  # 여기서 speaker_list를 초기화합니다.
 
-    for line in analysis_result.split('\n'):
+    for line in analysis_result.split("\n"):
         print(f"분석된 라인: {line}")
-        if line.startswith('파일명:'):
-            files = line.split(':')[1].strip()
-            if files != '없음':
-                file_list = metadata.get('file_names', [])
+        if line.startswith("파일명:"):
+            files = line.split(":")[1].strip()
+            if files != "없음":
+                file_list = old_metadata.get("file_names", [])
                 most_similar_file = find_most_similar_item(files, file_list)
                 if most_similar_file:
                     specific_files = [most_similar_file]
             print(f"메타데이터에서 매칭된 파일명: {specific_files}")
 
-        elif line.startswith('페이지 번호:'):
-            page = line.split(':')[1].strip()
-            if page != '없음':
-                specific_pages = [int(p) for p in re.findall(r'\d+', page)]
+        elif line.startswith("페이지 번호:"):
+            page = line.split(":")[1].strip()
+            if page != "없음":
+                specific_pages = [int(p) for p in re.findall(r"\d+", page)]
             print(f"추출된 페이지 번호: {specific_pages}")
 
-        elif line.startswith('발언자:'):
-            speakers = line.split(':')[1].strip()
-            if speakers != '없음':
-                speaker_list = metadata.get('speakers', [])
+        elif line.startswith("발언자:"):
+            speakers = line.split(":")[1].strip()
+            if speakers != "없음":
+                speaker_list = old_metadata.get("speakers", [])
                 most_similar_speaker = find_most_similar_speaker(speakers, speaker_list)
                 if most_similar_speaker:
                     specific_speakers = [most_similar_speaker]
             logger.info(f"Query: {speakers}")
             logger.info(f"메타데이터에서 매칭된 발언자: {specific_speakers}")
-    all_files = metadata.get('file_names', [])
-    
+    all_files = old_metadata.get("file_names", [])
+
     search_filters = []
     if specific_files:
         for file_name in specific_files:
@@ -403,30 +413,38 @@ def chat_interface_node(state: GraphState) -> GraphState:
 
     # 다음 노드 결정
     if specific_speakers:
-        next_node = 'query_processing_with_speaker'
-        print(f"발언자가 검출되었습니다: {specific_speakers}. 다음 노드: query_processing_with_speaker")
+        next_node = "query_processing_with_speaker"
+        print(
+            f"발언자가 검출되었습니다: {specific_speakers}. 다음 노드: query_processing_with_speaker"
+        )
     elif specific_pages:
-        next_node = 'query_processing_with_filter'
-        print(f"특정 페이지 번호가 검출되었습니다: {specific_pages}. 다음 노드: query_processing_with_filter")
+        next_node = "query_processing_with_filter"
+        print(
+            f"특정 페이지 번호가 검출되었습니다: {specific_pages}. 다음 노드: query_processing_with_filter"
+        )
     elif specific_files:
-        next_node = 'query_processing_with_filter'
-        print(f"특정 파일명이 검출되었습니다: {specific_files}. 다음 노드: query_processing_with_filter")
+        next_node = "query_processing_with_filter"
+        print(
+            f"특정 파일명이 검출되었습니다: {specific_files}. 다음 노드: query_processing_with_filter"
+        )
     else:
-        next_node = 'query_processing_without_filter'
-        print("특정 필터가 검출되지 않았습니다. 다음 노드: query_processing_without_filter")
+        next_node = "query_processing_without_filter"
+        print(
+            "특정 필터가 검출되지 않았습니다. 다음 노드: query_processing_without_filter"
+        )
 
     print(f"생성된 검색 필터: {search_filters}")
 
     return GraphState(
-        question=query,
-        search_filters=search_filters,
-        next_node=next_node
+        question=query, search_filters=search_filters, next_node=next_node
     )
+
+
 @traceable()
 def query_processing_with_speaker(state: GraphState) -> GraphState:
-    query = state['question']
-    index_name = state['db']
-    search_filters = state['search_filters']
+    query = state["question"]
+    index_name = state["db"]
+    search_filters = state["search_filters"]
 
     client = wrap_openai(openai.Client())
 
@@ -441,21 +459,23 @@ def query_processing_with_speaker(state: GraphState) -> GraphState:
             answer="인덱스 로드 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True
+            completed=True,
         )
 
     docs = []
     print("=== 검색 실행 시작 ===")
     try:
         for search_filter in search_filters:
-            docs.extend(vectorstore.similarity_search(query, k=1000, filter=search_filter))
+            docs.extend(
+                vectorstore.similarity_search(query, k=1000, filter=search_filter)
+            )
     except Exception as e:
         print(f"검색 실행 오류 발생: {str(e)}")
         return GraphState(
             answer="검색 실행 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True
+            completed=True,
         )
     seen_contents = {}
     unique_docs = []
@@ -466,21 +486,19 @@ def query_processing_with_speaker(state: GraphState) -> GraphState:
 
     if not unique_docs:
         return GraphState(
-            answer="관련 정보를 찾을 수 없습니다.",
-            page_numbers={},
-            next_question=True
+            answer="관련 정보를 찾을 수 없습니다.", page_numbers={}, next_question=True
         )
 
-    unique_docs.sort(key=lambda x: x.metadata.get('order', 0))
+    unique_docs.sort(key=lambda x: x.metadata.get("order", 0))
 
     context = ""
     page_numbers = {}
     current_tokens = 0
 
     for doc in unique_docs:
-        file_name = doc.metadata.get('file_name', 'Unknown')
-        page_number = doc.metadata.get('page_number', 'N/A')
-        speaker = doc.metadata.get('speaker', 'Unknown')
+        file_name = doc.metadata.get("file_name", "Unknown")
+        page_number = doc.metadata.get("page_number", "N/A")
+        speaker = doc.metadata.get("speaker", "Unknown")
         content = f"File: {file_name}, Page {page_number}, Speaker {speaker}: {doc.page_content}\n\n"
 
         tokens_in_content = len(content)
@@ -501,34 +519,25 @@ def query_processing_with_speaker(state: GraphState) -> GraphState:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "answer": {
-                        "type": "string",
-                        "description": "질문에 대한 답변"
-                    },
+                    "answer": {"type": "string", "description": "질문에 대한 답변"},
                     "pages": {
                         "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "확인된 페이지 번호들의 배열"
+                        "items": {"type": "string"},
+                        "description": "확인된 페이지 번호들의 배열",
                     },
                     "speakers": {
                         "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "발언자들의 배열"
+                        "items": {"type": "string"},
+                        "description": "발언자들의 배열",
                     },
                     "quotes": {
                         "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "확인한 문서의 내용"
-                    }
+                        "items": {"type": "string"},
+                        "description": "확인한 문서의 내용",
+                    },
                 },
-                "required": ["answer", "pages", "speakers", "quotes"]
-            }
+                "required": ["answer", "pages", "speakers", "quotes"],
+            },
         }
     ]
 
@@ -555,30 +564,33 @@ def query_processing_with_speaker(state: GraphState) -> GraphState:
         model="gpt-4o",
         messages=[{"role": "user", "content": answer_prompt}],
         functions=functions,
-        function_call={"name": "structured_answer"}
+        function_call={"name": "structured_answer"},
     )
 
-    function_response = json.loads(answer_response.choices[0].message.function_call.arguments)
+    function_response = json.loads(
+        answer_response.choices[0].message.function_call.arguments
+    )
 
     final_answer = {
         "answer": function_response["answer"],
         "page_numbers": function_response["pages"],
         "speakers": function_response["speakers"],
-        "quotes": function_response["quotes"]
+        "quotes": function_response["quotes"],
     }
 
     return GraphState(
         answer=final_answer,
         page_numbers=page_numbers,
         next_question=True,
-        completed=True
+        completed=True,
     )
-    
+
+
 @traceable()
 def query_processing_with_filter(state: GraphState) -> GraphState:
-    query = state['question']
-    index_name = state['db']
-    search_filters = state['search_filters']
+    query = state["question"]
+    index_name = state["db"]
+    search_filters = state["search_filters"]
 
     client = wrap_openai(openai.Client())
 
@@ -593,21 +605,23 @@ def query_processing_with_filter(state: GraphState) -> GraphState:
             answer="인덱스 로드 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True
+            completed=True,
         )
 
     docs = []
     print("=== 검색 실행 시작 ===")
     try:
         for search_filter in search_filters:
-            docs.extend(vectorstore.similarity_search(query, k=1000, filter=search_filter))
+            docs.extend(
+                vectorstore.similarity_search(query, k=1000, filter=search_filter)
+            )
     except Exception as e:
         print(f"검색 실행 오류 발생: {str(e)}")
         return GraphState(
             answer="검색 실행 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True
+            completed=True,
         )
     seen_contents = {}
     unique_docs = []
@@ -618,21 +632,19 @@ def query_processing_with_filter(state: GraphState) -> GraphState:
 
     if not unique_docs:
         return GraphState(
-            answer="관련 정보를 찾을 수 없습니다.",
-            page_numbers={},
-            next_question=True
+            answer="관련 정보를 찾을 수 없습니다.", page_numbers={}, next_question=True
         )
 
-    unique_docs.sort(key=lambda x: x.metadata.get('order', 0))
+    unique_docs.sort(key=lambda x: x.metadata.get("order", 0))
 
     context = ""
     page_numbers = {}
     current_tokens = 0
 
     for doc in unique_docs:
-        file_name = doc.metadata.get('file_name', 'Unknown')
-        page_number = doc.metadata.get('page_number', 'N/A')
-        speaker = doc.metadata.get('speaker', 'Unknown')
+        file_name = doc.metadata.get("file_name", "Unknown")
+        page_number = doc.metadata.get("page_number", "N/A")
+        speaker = doc.metadata.get("speaker", "Unknown")
         content = f"File: {file_name}, Page {page_number}, Speaker {speaker}: {doc.page_content}\n\n"
 
         tokens_in_content = len(content)
@@ -653,34 +665,25 @@ def query_processing_with_filter(state: GraphState) -> GraphState:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "answer": {
-                        "type": "string",
-                        "description": "질문에 대한 답변"
-                    },
+                    "answer": {"type": "string", "description": "질문에 대한 답변"},
                     "pages": {
                         "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "확인된 페이지 번호들의 배열"
+                        "items": {"type": "string"},
+                        "description": "확인된 페이지 번호들의 배열",
                     },
                     "speakers": {
                         "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "발언자들의 배열"
+                        "items": {"type": "string"},
+                        "description": "발언자들의 배열",
                     },
                     "quotes": {
                         "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "확인한 문서의 내용"
-                    }
+                        "items": {"type": "string"},
+                        "description": "확인한 문서의 내용",
+                    },
                 },
-                "required": ["answer", "pages", "speakers", "quotes"]
-            }
+                "required": ["answer", "pages", "speakers", "quotes"],
+            },
         }
     ]
 
@@ -709,32 +712,34 @@ def query_processing_with_filter(state: GraphState) -> GraphState:
         model="gpt-4o",
         messages=[{"role": "user", "content": answer_prompt}],
         functions=functions,
-        function_call={"name": "structured_answer"}
+        function_call={"name": "structured_answer"},
     )
 
-    function_response = json.loads(answer_response.choices[0].message.function_call.arguments)
+    function_response = json.loads(
+        answer_response.choices[0].message.function_call.arguments
+    )
 
     final_answer = {
         "answer": function_response["answer"],
         "page_numbers": function_response["pages"],
         "speakers": function_response["speakers"],
-        "quotes": function_response["quotes"]
+        "quotes": function_response["quotes"],
     }
 
     return GraphState(
         answer=final_answer,
         page_numbers=page_numbers,
         next_question=True,
-        completed=True
+        completed=True,
     )
+
 
 @traceable()
 def query_processing_without_filter(state: GraphState) -> GraphState:
-    query = state['question']
-    index_name = state['db']
+    query = state["question"]
+    index_name = state["db"]
 
     client = wrap_openai(openai.Client())
-    
 
     try:
         print("Pinecone 인덱스 로드 시작")
@@ -747,7 +752,7 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
             answer="인덱스 로드 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True
+            completed=True,
         )
 
     docs = []
@@ -760,7 +765,7 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
             answer="검색 실행 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True
+            completed=True,
         )
     seen_contents = {}
     unique_docs = []
@@ -771,21 +776,19 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
 
     if not unique_docs:
         return GraphState(
-            answer="관련 정보를 찾을 수 없습니다.",
-            page_numbers={},
-            next_question=True
+            answer="관련 정보를 찾을 수 없습니다.", page_numbers={}, next_question=True
         )
 
-    unique_docs.sort(key=lambda x: x.metadata.get('order', 0))
+    unique_docs.sort(key=lambda x: x.metadata.get("order", 0))
 
     context = ""
     page_numbers = {}
     current_tokens = 0
 
     for doc in unique_docs:
-        file_name = doc.metadata.get('file_name', 'Unknown')
-        page_number = doc.metadata.get('page_number', 'N/A')
-        speaker = doc.metadata.get('speaker', 'Unknown')
+        file_name = doc.metadata.get("file_name", "Unknown")
+        page_number = doc.metadata.get("page_number", "N/A")
+        speaker = doc.metadata.get("speaker", "Unknown")
         content = f"File: {file_name}, Page {page_number}, Speaker {speaker}: {doc.page_content}\n\n"
 
         tokens_in_content = len(content)
@@ -806,34 +809,25 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "answer": {
-                        "type": "string",
-                        "description": "질문에 대한 답변"
-                    },
+                    "answer": {"type": "string", "description": "질문에 대한 답변"},
                     "pages": {
                         "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "확인된 페이지 번호들의 배열"
+                        "items": {"type": "string"},
+                        "description": "확인된 페이지 번호들의 배열",
                     },
                     "speakers": {
                         "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "발언자들의 배열"
+                        "items": {"type": "string"},
+                        "description": "발언자들의 배열",
                     },
                     "quotes": {
                         "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "확인한 문서의 내용"
-                    }
+                        "items": {"type": "string"},
+                        "description": "확인한 문서의 내용",
+                    },
                 },
-                "required": ["answer", "pages", "speakers", "quotes"]
-            }
+                "required": ["answer", "pages", "speakers", "quotes"],
+            },
         }
     ]
 
@@ -863,51 +857,63 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
         model="gpt-4o",
         messages=[{"role": "user", "content": answer_prompt}],
         functions=functions,
-        function_call={"name": "structured_answer"}
+        function_call={"name": "structured_answer"},
     )
 
-    function_response = json.loads(answer_response.choices[0].message.function_call.arguments)
+    function_response = json.loads(
+        answer_response.choices[0].message.function_call.arguments
+    )
 
     final_answer = {
         "answer": function_response["answer"],
         "page_numbers": function_response["pages"],
         "speakers": function_response["speakers"],
-        "quotes": function_response["quotes"]
+        "quotes": function_response["quotes"],
     }
 
     return GraphState(
         answer=final_answer,
         page_numbers=page_numbers,
         next_question=True,
-        completed=True
+        completed=True,
     )
 
+
 def route_by_file_type(state: GraphState) -> str:
-    file_types = state['file_types']
-    
+    file_types = state["file_types"]
+
     if not file_types:
         raise ValueError("파일 유형이 지정되지 않았습니다.")
-    
-    if 'pdf' in file_types:
+
+    if "pdf" in file_types:
         return "pdf_processing"
     else:
         raise ValueError("지원되지 않는 파일 형식입니다.")
+
+
 def route_by_query_type(state: GraphState) -> str:
-    return state['next_node']
+    return state["next_node"]
+
 
 def route_by_file_type(state: GraphState) -> str:
-    return state['next_node']
+    return state["next_node"]
+
 
 def should_continue(state: GraphState) -> bool:
-    return state['question'] != "" and not state.get('completed', False)
+    return state["question"] != "" and not state.get("completed", False)
+
 
 def should_end(state: GraphState) -> bool:
-    return state.get('next_question', False) or state['question'] == "" or state.get('completed', False)
+    return (
+        state.get("next_question", False)
+        or state["question"] == ""
+        or state.get("completed", False)
+    )
 
 
 def create_file_processing_workflow():
     workflow = StateGraph(GraphState)
-    
+
     workflow.add_node("data_input", data_input_node)
     workflow.add_node("pdf_processing_with_speaker", pdf_processing_with_speaker)
     workflow.add_node("pdf_processing_without_speaker", pdf_processing_without_speaker)
@@ -918,34 +924,35 @@ def create_file_processing_workflow():
         route_by_file_type,
         {
             "pdf_processing_with_speaker": "pdf_processing_with_speaker",
-            "pdf_processing_without_speaker": "pdf_processing_without_speaker"
-        }
+            "pdf_processing_without_speaker": "pdf_processing_without_speaker",
+        },
     )
     workflow.add_edge("pdf_processing_with_speaker", "vector_storage")
     workflow.add_edge("pdf_processing_without_speaker", "vector_storage")
 
     def check_vector_storage_completion(state):
-        return state.get('completed', False) or state.get('error') is not None
+        return state.get("completed", False) or state.get("error") is not None
 
     workflow.add_conditional_edges(
         "vector_storage",
         check_vector_storage_completion,
-        {
-            True: END,
-            False: "vector_storage"
-        }
+        {True: END, False: "vector_storage"},
     )
 
     workflow.set_entry_point("data_input")
     logger.debug("File processing workflow created")
     return workflow.compile()
+
+
 def create_qa_workflow():
     workflow = StateGraph(GraphState)
-    
+
     workflow.add_node("chat_interface", chat_interface_node)
     workflow.add_node("query_processing_with_speaker", query_processing_with_speaker)
     workflow.add_node("query_processing_with_filter", query_processing_with_filter)
-    workflow.add_node("query_processing_without_filter", query_processing_without_filter)
+    workflow.add_node(
+        "query_processing_without_filter", query_processing_without_filter
+    )
 
     workflow.add_conditional_edges(
         "chat_interface",
@@ -953,58 +960,48 @@ def create_qa_workflow():
         {
             "query_processing_with_speaker": "query_processing_with_speaker",
             "query_processing_with_filter": "query_processing_with_filter",
-            "query_processing_without_filter": "query_processing_without_filter"
-        }
+            "query_processing_without_filter": "query_processing_without_filter",
+        },
     )
 
     workflow.add_conditional_edges(
         "query_processing_with_speaker",
         should_end,
-        {
-            True: END,
-            False: "chat_interface"
-        }
+        {True: END, False: "chat_interface"},
     )
     workflow.add_conditional_edges(
-        "query_processing_with_filter",
-        should_end,
-        {
-            True: END,
-            False: "chat_interface"
-        }
+        "query_processing_with_filter", should_end, {True: END, False: "chat_interface"}
     )
     workflow.add_conditional_edges(
         "query_processing_without_filter",
         should_end,
-        {
-            True: END,
-            False: "chat_interface"
-        }
+        {True: END, False: "chat_interface"},
     )
 
     workflow.set_entry_point("chat_interface")
     return workflow.compile()
 
+
 def process_files(file_paths: List[str]) -> str:
     workflow = create_file_processing_workflow()
     state = GraphState(
-        file_paths=file_paths, 
-        processed_data=[], 
-        db="", 
+        file_paths=file_paths,
+        processed_data=[],
+        db="",
         completed=False,
-        file_types=['pdf']
+        file_types=["pdf"],
     )
-    
+
     for output in workflow.stream(state):
         if output.get("vector_storage", {}).get("completed", False):
             return output["vector_storage"]["db"]
-    
+
     raise ValueError("파일 처리 중 오류가 발생했습니다.")
-    
+
 
 def process_query(state: GraphState) -> Dict:
     workflow = create_qa_workflow()
-    
+
     for output in workflow.stream(state):
         if not output:
             break
@@ -1012,8 +1009,12 @@ def process_query(state: GraphState) -> Dict:
         new_state = output[current_node]
         state.update(new_state)
 
-        if current_node in ["query_processing_with_speaker", "query_processing_with_filter", "query_processing_without_filter"]:
-            if state.get('next_question', False):
-                return state['answer']
-    
-    return state.get('answer', {})
+        if current_node in [
+            "query_processing_with_speaker",
+            "query_processing_with_filter",
+            "query_processing_without_filter",
+        ]:
+            if state.get("next_question", False):
+                return state["answer"]
+
+    return state.get("answer", {})
