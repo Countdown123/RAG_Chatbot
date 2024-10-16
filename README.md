@@ -3,7 +3,7 @@
 "RetrieveR is an AI-powered document analysis service that transforms unstructured data into actionable insights through intelligent, real-time interactions."
 
 ## 📄 Description
-RetrieveR is a document analysis service that leverages AI technology to analyze user-uploaded documents and provide accurate answers. It supports various formats of unstructured data, such as meeting minutes, business Excel files, and CSV files. Through artificial intelligence, it understands the content of the documents and automatically extracts relevant information.
+RetrieveR is a document analysis service that leverages AI technology to analyze user-uploaded documents and provide accurate answers. It supports various types of unstructured data, such as meeting minutes, business Excel files, and CSV files. Based on the uploaded files, it offers a chatbot-style interaction that allows users to ask questions and retrieve the necessary information. By understanding the data within the files, users can quickly access the information they need in a conversational manner, making it easy to gain insights.
 
 ## ⏳ Development period
 2024.08.26 ~ 2024.10.18
