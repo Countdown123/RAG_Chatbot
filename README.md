@@ -1,36 +1,39 @@
-# RetrieveR
+# 🤖 RetrieveR
 
 "RetrieveR is an AI-powered document analysis service that transforms unstructured data into actionable insights through intelligent, real-time interactions."
 
-## Description
+## 📄 Description
 RetrieveR is a document analysis service that leverages AI technology to analyze user-uploaded documents and provide accurate answers. It supports various formats of unstructured data, such as meeting minutes, business Excel files, and CSV files. Through artificial intelligence, it understands the content of the documents and automatically extracts relevant information.
 
-## Development period
+## ⏳ Development period
 2024.08.26 ~ 2024.10.18
 
-## Key Features
-- **Support for various data formats**: Analyzes unstructured data such as meeting minutes, Excel, CSV, etc., to extract key information.
-- **AI-based analysis**: Leverages artificial intelligence to understand document content and provide customized answers for users.
-- **Intuitive user interface**: Provides an easy-to-use interface, even for users without data or IT knowledge.
-- **Automation of business processes**: Automates information provision through document analysis, maximizing decision-making and operational efficiency.
-- **Chatbot and Data Visualization**: Users can interact with the chatbot to explore information based on the analyzed data, and easily understand the data through interactive dashboards.
+## ✨ Key Features
+### Support for various data formats
+Analyzes unstructured data such as meeting minutes, Excel, CSV, etc., to extract key information. In particular, for meeting minutes, AI automatically extracts metadata and provides it in an easily viewable format.
+### AI-based analysis
+Leverages artificial intelligence to understand document content and provide customized answers for users.
+### Intuitive user interface
+Offers an easy-to-use interface, even for users without data or IT knowledge.
+### Chatbot interaction
+Users can engage in relevant questions with the chatbot based on the uploaded documents. Through these questions, users can effectively extract the necessary information from the document and gain insights.
 
-## How to Use
-### 1. Upload documents
-You can upload Excel, CSV, or PDF files.
-### 2. AI analyzes the documents 
-The AI analyzes the content of the uploaded documents and provides relevant answers.
-### 3. Interact through the chatbot 
-Ask questions via the interactive chatbot and receive real-time answers based on the information within the documents. During this process, you can explore the data and gain the insights you need.
+## 📝 How to Use
+### 1. Upload your documents
+You can upload documents in Excel, CSV, or PDF formats.
+### 2. AI processes the documents
+The AI automatically analyzes the content of the uploaded documents and provides metadata for PDFs.
+### 3. Interact with the chatbot
+Ask questions through the interactive chatbot, and receive real-time answers based on the analyzed data. This allows you to explore the documents further and uncover valuable insights.
 
-## Tech Stack
+## 🛠️ Tech Stack
 - **Backend**: FastAPI, Python
 - **Frontend**: HTML, CSS, JavaScript
 - **Database**: SQLite, Pinecone
 - **AI/ML**: GPT, LangChain, LangGraph
 - **Real-time Communication**: WebSocket
 
-## Installation and Execution
+## ⚙️ Installation and Execution
 ### 1. Project clone
 
     git clone https://github.com/Countdown123/RAG_Chatbot.git
@@ -46,4 +49,3 @@ Check the runtime.txt file to see the required Python version and set up the env
 Run the FastAPI server locally.
 
     python main.py
-
