@@ -434,36 +434,19 @@ async def websocket_endpoint(websocket: WebSocket):
                                             else:
                                                 graph_state.question = data
                                                 graph_state.next_node = "chat_interface"
-                                                graph_state.metadata = (
-                                                    file_metadata.get("metadata", {})
-                                                )  #
+                                                graph_state.metadata = file_metadata.get('metadata', {})  #
 
-                                                logger.info(
-                                                    f"Updated graph state: {graph_state}"
-                                                )
+                                                logger.info(f"Updated graph state: {graph_state}")
 
                                             result = process_query(graph_state)
-
+                                            
                                             answer = result.get("answer", "")
-                                            page_numbers = result.get(
-                                                "page_numbers", []
-                                            )
-                                            speakers = result.get("speakers", [])
-                                            quotes = result.get("quotes", [])
+                                            page_numbers = result.get("page_numbers", [])
                                             response = f"""답변:
                                             {answer}
 
                                             확인된 페이지:
-                                            {', '.join(map(str, page_numbers))}
-
-                                            발언자:
-                                            {', '.join(speakers)}
-
-                                            인용문:
-                                            """ + "\n\n".join(
-                                                f"{i+1}. {quote}"
-                                                for i, quote in enumerate(quotes)
-                                            )
+                                            {', '.join(map(str, page_numbers))}"""
                                         else:
                                             response = "Error: Pinecone index name not found for this PDF file."
                                     else:

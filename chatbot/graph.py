@@ -438,13 +438,11 @@ def chat_interface_node(state: GraphState) -> GraphState:
     return GraphState(
         question=query, search_filters=search_filters, next_node=next_node
     )
-
-
 @traceable()
 def query_processing_with_speaker(state: GraphState) -> GraphState:
-    query = state["question"]
-    index_name = state["db"]
-    search_filters = state["search_filters"]
+    query = state['question']
+    index_name = state['db']
+    search_filters = state['search_filters']
 
     client = wrap_openai(openai.Client())
 
@@ -459,23 +457,21 @@ def query_processing_with_speaker(state: GraphState) -> GraphState:
             answer="인덱스 로드 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True,
+            completed=True
         )
 
     docs = []
     print("=== 검색 실행 시작 ===")
     try:
         for search_filter in search_filters:
-            docs.extend(
-                vectorstore.similarity_search(query, k=1000, filter=search_filter)
-            )
+            docs.extend(vectorstore.similarity_search(query, k=1000, filter=search_filter))
     except Exception as e:
         print(f"검색 실행 오류 발생: {str(e)}")
         return GraphState(
             answer="검색 실행 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True,
+            completed=True
         )
     seen_contents = {}
     unique_docs = []
@@ -486,19 +482,21 @@ def query_processing_with_speaker(state: GraphState) -> GraphState:
 
     if not unique_docs:
         return GraphState(
-            answer="관련 정보를 찾을 수 없습니다.", page_numbers={}, next_question=True
+            answer="관련 정보를 찾을 수 없습니다.",
+            page_numbers={},
+            next_question=True
         )
 
-    unique_docs.sort(key=lambda x: x.metadata.get("order", 0))
+    unique_docs.sort(key=lambda x: x.metadata.get('order', 0))
 
     context = ""
     page_numbers = {}
     current_tokens = 0
 
     for doc in unique_docs:
-        file_name = doc.metadata.get("file_name", "Unknown")
-        page_number = doc.metadata.get("page_number", "N/A")
-        speaker = doc.metadata.get("speaker", "Unknown")
+        file_name = doc.metadata.get('file_name', 'Unknown')
+        page_number = doc.metadata.get('page_number', 'N/A')
+        speaker = doc.metadata.get('speaker', 'Unknown')
         content = f"File: {file_name}, Page {page_number}, Speaker {speaker}: {doc.page_content}\n\n"
 
         tokens_in_content = len(content)
@@ -513,31 +511,26 @@ def query_processing_with_speaker(state: GraphState) -> GraphState:
         page_numbers[file_name].append(page_number)
 
     functions = [
-        {
+    {
             "name": "structured_answer",
             "description": "질문에 대한 구조화된 답변을 제공합니다.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "answer": {"type": "string", "description": "질문에 대한 답변"},
+                    "answer": {
+                        "type": "string",
+                        "description": "질문에 대한 답변"
+                    },
                     "pages": {
                         "type": "array",
-                        "items": {"type": "string"},
-                        "description": "확인된 페이지 번호들의 배열",
-                    },
-                    "speakers": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "발언자들의 배열",
-                    },
-                    "quotes": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "확인한 문서의 내용",
-                    },
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "확인된 페이지 번호들의 배열"
+                    }
                 },
-                "required": ["answer", "pages", "speakers", "quotes"],
-            },
+                "required": ["answer", "pages"]
+            }
         }
     ]
 
@@ -551,46 +544,37 @@ def query_processing_with_speaker(state: GraphState) -> GraphState:
 
     답변 시 아래의 사항을 준수해 주세요:
     1. 문서의 내용을 기반으로 답변하세요.
-    2. 관련된 파일명과 페이지 번호를 반드시 언급하세요.
-    3. 특정 발언자의 말을 인용할 때는 반드시 발언자의 이름을 명시하세요.
-    4. 추측이나 외부 지식을 사용하지 말고, 제공된 정보만을 참고해 답변하세요.
-    5. 질문에 대한 정보가 제공된 데이터에 없다면, 그 사실을 명확히 언급하세요.
-    6. 여러 파일에서 정보가 나왔다면, 각 파일의 정보를 구분하여 답변하세요.
-    7. 발언자에 관한 질문일 경우에도 관련된 파일명과 페이지 번호를 함께 제공하세요.
-    8. quotes 항목에는 답변에 사용된 관련 문서 내용을 포함시켜 주세요.
+    2. 추측이나 외부 지식을 사용하지 말고, 제공된 정보만을 참고해 답변하세요.
+    3. 질문에 대한 정보가 제공된 데이터에 없다면, 그 사실을 명확히 언급하세요.
+    4. 여러 파일에서 정보가 나왔다면, 각 파일의 정보를 구분하여 답변하세요.
     """
 
     answer_response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": answer_prompt}],
         functions=functions,
-        function_call={"name": "structured_answer"},
+        function_call={"name": "structured_answer"}
     )
 
-    function_response = json.loads(
-        answer_response.choices[0].message.function_call.arguments
-    )
+    function_response = json.loads(answer_response.choices[0].message.function_call.arguments)
 
     final_answer = {
         "answer": function_response["answer"],
-        "page_numbers": function_response["pages"],
-        "speakers": function_response["speakers"],
-        "quotes": function_response["quotes"],
+        "page_numbers": function_response["pages"]
     }
 
     return GraphState(
         answer=final_answer,
         page_numbers=page_numbers,
         next_question=True,
-        completed=True,
+        completed=True
     )
-
-
+    
 @traceable()
 def query_processing_with_filter(state: GraphState) -> GraphState:
-    query = state["question"]
-    index_name = state["db"]
-    search_filters = state["search_filters"]
+    query = state['question']
+    index_name = state['db']
+    search_filters = state['search_filters']
 
     client = wrap_openai(openai.Client())
 
@@ -605,23 +589,21 @@ def query_processing_with_filter(state: GraphState) -> GraphState:
             answer="인덱스 로드 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True,
+            completed=True
         )
 
     docs = []
     print("=== 검색 실행 시작 ===")
     try:
         for search_filter in search_filters:
-            docs.extend(
-                vectorstore.similarity_search(query, k=1000, filter=search_filter)
-            )
+            docs.extend(vectorstore.similarity_search(query, k=1000, filter=search_filter))
     except Exception as e:
         print(f"검색 실행 오류 발생: {str(e)}")
         return GraphState(
             answer="검색 실행 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True,
+            completed=True
         )
     seen_contents = {}
     unique_docs = []
@@ -632,19 +614,21 @@ def query_processing_with_filter(state: GraphState) -> GraphState:
 
     if not unique_docs:
         return GraphState(
-            answer="관련 정보를 찾을 수 없습니다.", page_numbers={}, next_question=True
+            answer="관련 정보를 찾을 수 없습니다.",
+            page_numbers={},
+            next_question=True
         )
 
-    unique_docs.sort(key=lambda x: x.metadata.get("order", 0))
+    unique_docs.sort(key=lambda x: x.metadata.get('order', 0))
 
     context = ""
     page_numbers = {}
     current_tokens = 0
 
     for doc in unique_docs:
-        file_name = doc.metadata.get("file_name", "Unknown")
-        page_number = doc.metadata.get("page_number", "N/A")
-        speaker = doc.metadata.get("speaker", "Unknown")
+        file_name = doc.metadata.get('file_name', 'Unknown')
+        page_number = doc.metadata.get('page_number', 'N/A')
+        speaker = doc.metadata.get('speaker', 'Unknown')
         content = f"File: {file_name}, Page {page_number}, Speaker {speaker}: {doc.page_content}\n\n"
 
         tokens_in_content = len(content)
@@ -665,25 +649,20 @@ def query_processing_with_filter(state: GraphState) -> GraphState:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "answer": {"type": "string", "description": "질문에 대한 답변"},
+                    "answer": {
+                        "type": "string",
+                        "description": "질문에 대한 답변"
+                    },
                     "pages": {
                         "type": "array",
-                        "items": {"type": "string"},
-                        "description": "확인된 페이지 번호들의 배열",
-                    },
-                    "speakers": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "발언자들의 배열",
-                    },
-                    "quotes": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "확인한 문서의 내용",
-                    },
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "확인된 페이지 번호들의 배열"
+                    }
                 },
-                "required": ["answer", "pages", "speakers", "quotes"],
-            },
+                "required": ["answer", "pages"]
+            }
         }
     ]
 
@@ -696,50 +675,42 @@ def query_processing_with_filter(state: GraphState) -> GraphState:
     {query}
 
     답변 시 아래의 사항을 준수해 주세요:
-    1. 문서의 내용을 기반으로 상세하게 답변하세요.
-    2. 관련된 파일명과 페이지 번호를 반드시 명확하게 언급하세요. 특히 질문이 특정 파일이나 페이지에 관한 것이라면, 해당 정보를 답변의 시작 부분에 명시하세요.
-    3. 파일의 구조나 페이지 레이아웃에 대한 정보가 있다면 이를 설명에 포함시키세요. 예를 들어, 특정 페이지가 목차인지, 본문인지, 부록인지 등을 언급하세요.
-    4. 질문이 특정 페이지나 파일의 내용에 관한 것이라면, 해당 페이지나 파일의 주요 내용을 요약하여 제공하세요.
-    5. 여러 페이지나 파일에 걸쳐 정보가 분산되어 있다면, 각 페이지나 파일의 정보를 명확히 구분하여 설명하세요.
-    6. 페이지 번호의 연속성이나 파일 간의 관계에 대해 언급할 수 있는 정보가 있다면 포함시키세요.
-    7. 추측이나 외부 지식을 사용하지 말고, 제공된 정보만을 참고해 답변하세요.
-    8. 질문에 대한 정보가 제공된 데이터에 없다면, 그 사실을 명확히 언급하고 가장 관련성 높은 정보를 제시하세요.
-    9. quotes 항목에는 답변에 사용된 관련 문서 내용을 포함시키되, 특히 중요하거나 직접적으로 관련된 부분을 선별하여 포함시키세요.
-    10. 가능하다면 페이지나 파일 간의 정보를 연결하여 전체적인 맥락을 제공하세요.
+    1. 질문에 직접적으로 관련된 정보만을 포함하여 간결하게 답변하세요.
+    2. 문서의 내용만을 기반으로 답변하고, 추측이나 외부 지식을 사용하지 마세요.
+    3. 관련된 파일명과 페이지 번호를 반드시 언급하세요. 특히 질문이 특정 파일이나 페이지에 관한 것이라면, 해당 정보를 답변의 시작 부분에 명시하세요.
+    4. 여러 페이지나 파일에 걸쳐 정보가 분산되어 있다면, 각 페이지나 파일의 정보를 명확히 구분하여 설명하세요.
+    5. 질문에 대한 정보가 제공된 데이터에 없다면, 그 사실을 간단히 언급하세요.
+    6. 답변은 명확하고 직설적으로 작성하여, 사용자가 추가 설명 없이도 이해할 수 있도록 하세요.
+    7. 불필요한 세부 사항이나 부가 설명은 생략하고, 질문의 핵심에 맞는 답변만 제공하세요.
     """
-
     answer_response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": answer_prompt}],
         functions=functions,
-        function_call={"name": "structured_answer"},
+        function_call={"name": "structured_answer"}
     )
 
-    function_response = json.loads(
-        answer_response.choices[0].message.function_call.arguments
-    )
+    function_response = json.loads(answer_response.choices[0].message.function_call.arguments)
 
     final_answer = {
         "answer": function_response["answer"],
-        "page_numbers": function_response["pages"],
-        "speakers": function_response["speakers"],
-        "quotes": function_response["quotes"],
+        "page_numbers": function_response["pages"]
     }
 
     return GraphState(
         answer=final_answer,
         page_numbers=page_numbers,
         next_question=True,
-        completed=True,
+        completed=True
     )
-
 
 @traceable()
 def query_processing_without_filter(state: GraphState) -> GraphState:
-    query = state["question"]
-    index_name = state["db"]
+    query = state['question']
+    index_name = state['db']
 
     client = wrap_openai(openai.Client())
+    
 
     try:
         print("Pinecone 인덱스 로드 시작")
@@ -752,7 +723,7 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
             answer="인덱스 로드 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True,
+            completed=True
         )
 
     docs = []
@@ -765,7 +736,7 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
             answer="검색 실행 중 오류가 발생했습니다.",
             page_numbers={},
             next_question=True,
-            completed=True,
+            completed=True
         )
     seen_contents = {}
     unique_docs = []
@@ -776,19 +747,21 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
 
     if not unique_docs:
         return GraphState(
-            answer="관련 정보를 찾을 수 없습니다.", page_numbers={}, next_question=True
+            answer="관련 정보를 찾을 수 없습니다.",
+            page_numbers={},
+            next_question=True
         )
 
-    unique_docs.sort(key=lambda x: x.metadata.get("order", 0))
+    unique_docs.sort(key=lambda x: x.metadata.get('order', 0))
 
     context = ""
     page_numbers = {}
     current_tokens = 0
 
     for doc in unique_docs:
-        file_name = doc.metadata.get("file_name", "Unknown")
-        page_number = doc.metadata.get("page_number", "N/A")
-        speaker = doc.metadata.get("speaker", "Unknown")
+        file_name = doc.metadata.get('file_name', 'Unknown')
+        page_number = doc.metadata.get('page_number', 'N/A')
+        speaker = doc.metadata.get('speaker', 'Unknown')
         content = f"File: {file_name}, Page {page_number}, Speaker {speaker}: {doc.page_content}\n\n"
 
         tokens_in_content = len(content)
@@ -809,25 +782,20 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "answer": {"type": "string", "description": "질문에 대한 답변"},
+                    "answer": {
+                        "type": "string",
+                        "description": "질문에 대한 답변"
+                    },
                     "pages": {
                         "type": "array",
-                        "items": {"type": "string"},
-                        "description": "확인된 페이지 번호들의 배열",
-                    },
-                    "speakers": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "발언자들의 배열",
-                    },
-                    "quotes": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "확인한 문서의 내용",
-                    },
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "확인된 페이지 번호들의 배열"
+                    }
                 },
-                "required": ["answer", "pages", "speakers", "quotes"],
-            },
+                "required": ["answer", "pages"]
+            }
         }
     ]
 
@@ -840,42 +808,32 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
     {query}
 
     답변 시 아래의 사항을 준수해 주세요:
-    1. 제공된 모든 관련 정보를 종합하여 포괄적이고 상세한 답변을 제공하세요.
-    2. 답변에 사용된 정보의 출처(파일명, 페이지 번호)를 명시하되, 정보의 중요성에 따라 적절히 강조하세요.
-    3. 여러 문서나 페이지에서 나온 정보를 논리적으로 연결하여 일관성 있는 답변을 구성하세요.
-    4. 발언자의 말을 인용할 때는 발언자의 이름을 명시하고, 해당 발언의 맥락도 간단히 설명해 주세요.
-    5. 질문과 직접적으로 관련된 정보뿐만 아니라, 간접적으로 관련되거나 추가적인 맥락을 제공할 수 있는 정보도 포함시키세요.
-    6. 제공된 정보들 사이에 상충되는 내용이 있다면 이를 명시하고, 가능한 설명을 제시하세요.
-    7. 질문에 대한 직접적인 답변이 제공된 데이터에 없다면, 가장 관련성 높은 정보를 제시하고 왜 정확한 답변을 할 수 없는지 설명하세요.
-    8. 답변 내용을 논리적인 순서나 주제별로 구조화하여 제시하세요.
-    9. quotes 항목에는 답변에 사용된 가장 중요하거나 대표적인 문서 내용을 포함시키되, 다양한 출처에서 균형있게 선택하세요.
-    10. 답변의 끝부분에는 제공된 정보를 바탕으로 한 간단한 요약이나 결론을 제시하세요.
-    11. 외부 지식이나 추측을 사용하지 말고, 오직 제공된 정보만을 바탕으로 답변하세요.
+    1. 질문에 직접적으로 관련된 정보만을 사용하여 간결하고 명확하게 답변하세요.
+    2. 제공된 정보만을 바탕으로 답변하고, 외부 지식이나 추측을 사용하지 마세요.
+    3. 여러 문서나 페이지의 정보를 사용할 경우, 정보를 논리적으로 연결하여 일관성 있게 답변하세요.
+    4. 제공된 정보들 사이에 상충되는 내용이 있다면 간단히 언급하세요.
+    5. 질문에 대한 직접적인 답변이 제공된 데이터에 없다면, 그 사실을 명시하고 가장 관련성 높은 정보를 간단히 제시하세요.
+    6. 불필요한 세부 사항이나 부가 설명은 생략하고, 질문의 핵심에 맞는 답변만 제공하세요.
     """
-
     answer_response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": answer_prompt}],
         functions=functions,
-        function_call={"name": "structured_answer"},
+        function_call={"name": "structured_answer"}
     )
 
-    function_response = json.loads(
-        answer_response.choices[0].message.function_call.arguments
-    )
+    function_response = json.loads(answer_response.choices[0].message.function_call.arguments)
 
     final_answer = {
         "answer": function_response["answer"],
-        "page_numbers": function_response["pages"],
-        "speakers": function_response["speakers"],
-        "quotes": function_response["quotes"],
+        "page_numbers": function_response["pages"]
     }
 
     return GraphState(
         answer=final_answer,
         page_numbers=page_numbers,
         next_question=True,
-        completed=True,
+        completed=True
     )
 
 
