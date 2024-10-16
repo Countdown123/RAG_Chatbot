@@ -34,18 +34,25 @@ Ask questions through the interactive chatbot, and receive real-time answers bas
 - **Real-time Communication**: WebSocket
 
 ## ⚙️ Installation and Execution
-### 1. Project clone
+### 1. Clone the repository
 
     git clone https://github.com/Countdown123/RAG_Chatbot.git
 
-### 2. Install dependencies
+### 2. Navigate to the project directory
+
+    cd RAG_Chatbot/chatbot
+
+### 3. Install dependencies
 
     pip install -r requirements.txt
 
-### 3. Set up runtime environment
+### 4. Set up runtime environment
 Check the runtime.txt file to see the required Python version and set up the environment accordingly.
 
-### 4. Start the server
+### 5. Start the server
 Run the FastAPI server locally.
 
     python main.py
+
+### 6. Get started on web browser
+Open http://127.0.0.1:3939/
