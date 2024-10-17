@@ -1,8 +1,7 @@
-from sqlalchemy import Column, Integer, VARCHAR, DateTime, String, ForeignKey, Text
-from datetime import datetime
+from sqlalchemy import Column, Integer, String, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 
 from database import Base
 

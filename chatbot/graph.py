@@ -2,15 +2,10 @@ import pdfplumber
 from langchain.docstore.document import Document
 from langchain_community.vectorstores import Pinecone
 from langchain_community.embeddings import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Pinecone as LangchainPinecone
 from langsmith.wrappers import wrap_openai
 import openai
-import tempfile
-import shutil
-import time
 import re
-import pinecone
 from dotenv import load_dotenv
 import re
 from typing import TypedDict, List, Set, Literal, Dict, Any
@@ -18,13 +13,9 @@ import os
 from pinecone import Pinecone, ServerlessSpec
 from langsmith import traceable
 from langgraph.graph import StateGraph, END
-import gc
 import logging
 import json
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
 import unicodedata
 from difflib import SequenceMatcher
 
