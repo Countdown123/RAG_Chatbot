@@ -266,10 +266,6 @@ function startNewChat() {
     // Notify the server about the new chat session
     window.ws.send(`new_chat:${newChatId}`);
 
-    // Hardcoded welcome message sent through WebSocket
-    const welcomeMessage = "New chat started. How can I help you?";
-    window.ws.send(welcomeMessage);
-
     // Display the welcome message in the UI
     addMessageToDisplay(welcomeMessage, "received");
 

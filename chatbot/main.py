@@ -76,6 +76,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 # Initialize SQLChatbot
 sql_chatbot = None
 
+
 def create_access_token(data: dict, expires_delta: timedelta = None):
     """
     Create a JWT access token.
@@ -94,6 +95,7 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
         expire = datetime.now() + timedelta(minutes=15)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
@@ -130,6 +132,7 @@ async def get_current_user(
         raise credentials_exception
     return user
 
+
 # Ensure the 'uploads' directory exists
 if not os.path.exists("uploads"):
     os.makedirs("uploads")
@@ -155,10 +158,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/templates", StaticFiles(directory="templates"), name="templates")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+
 class ConnectionManager:
     """
     Manages WebSocket connections.
     """
+
     def __init__(self):
         self.active_connections: List[WebSocket] = []
 
@@ -185,8 +190,10 @@ class ConnectionManager:
         await websocket.send_text(message)
         logger.info(f"Sent message to client: {message}")
 
+
 # Initialize connection manager
 manager = ConnectionManager()
+
 
 # Helper functions for chat and file management
 def get_chat_directory(user_id: int, chat_id: str) -> Path:
@@ -201,6 +208,7 @@ def get_chat_directory(user_id: int, chat_id: str) -> Path:
         Path: Directory path.
     """
     return Path(f"uploads/{user_id}/{chat_id}")
+
 
 def save_chat_history_to_file(user_id: int, chat_id: str, messages: List[dict]):
     """
@@ -217,6 +225,7 @@ def save_chat_history_to_file(user_id: int, chat_id: str, messages: List[dict]):
     with open(chat_history_file, "w") as f:
         json.dump(messages, f, indent=4)
     logger.info(f"Chat history saved to {chat_history_file}")
+
 
 def load_chat_history_from_file(user_id: int, chat_id: str) -> List[dict]:
     """
@@ -237,6 +246,7 @@ def load_chat_history_from_file(user_id: int, chat_id: str) -> List[dict]:
     with open(chat_history_file, "r") as f:
         messages = json.load(f)
     return messages
+
 
 def save_uploaded_file(user_id: int, chat_id: str, file: UploadFile) -> str:
     """
@@ -286,6 +296,7 @@ def save_uploaded_file(user_id: int, chat_id: str, file: UploadFile) -> str:
     logger.info(f"File {filename} saved successfully to {file_path}")
     return str(file_path)
 
+
 # Routes
 @app.post("/users/")
 async def create_user_endpoint(
@@ -318,6 +329,7 @@ async def create_user_endpoint(
     create_user(db, user_create)
     return {"message": "User created successfully"}
 
+
 @app.post("/token", response_model=Token)
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -345,6 +357,7 @@ async def login_for_access_token(
     )
     return Token(access_token=access_token, token_type="bearer")
 
+
 @app.get("/chats/", response_model=List[ChatMetadata])
 async def get_chats(
     current_user: User = Depends(get_current_user),
@@ -370,6 +383,7 @@ async def get_chats(
         for chat in chats
     ]
     return chat_list
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -437,6 +451,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 save_chat_history_to_file(user.id, chat_id, messages)
                 # Send confirmation to client
                 await websocket.send_text(f"Chat {chat_id} started.")
+                welcome_message = "New chat started. How can I help you?"
+                await websocket.send_text(welcome_message)
                 graph_state = None  # Reset graph state for new chat
                 logger.info(f"Graph state initialized to None for new chat: {chat_id}")
             else:
@@ -516,14 +532,20 @@ async def websocket_endpoint(websocket: WebSocket):
                                             else:
                                                 graph_state.question = data
                                                 graph_state.next_node = "chat_interface"
-                                                graph_state.metadata = file_metadata.get('metadata', {})
+                                                graph_state.metadata = (
+                                                    file_metadata.get("metadata", {})
+                                                )
 
-                                                logger.info(f"Updated graph state: {graph_state}")
+                                                logger.info(
+                                                    f"Updated graph state: {graph_state}"
+                                                )
 
                                             result = process_query(graph_state)
-                                            
+
                                             answer = result.get("answer", "")
-                                            page_numbers = result.get("page_numbers", [])
+                                            page_numbers = result.get(
+                                                "page_numbers", []
+                                            )
                                             response = f"""답변:
                                             {answer}
 
@@ -580,6 +602,7 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"Error in WebSocket connection: {e}")
         manager.disconnect(websocket)
         db.close()
+
 
 @app.post("/upload/")
 async def upload_file(
@@ -759,9 +782,7 @@ async def upload_file(
                     logger.error(f"Error initializing SQLChatbot: {str(e)}")
                     raise HTTPException(status_code=400, detail=str(e))
                 except Exception as e:
-                    logger.error(
-                        f"Unexpected error initializing SQLChatbot: {str(e)}"
-                    )
+                    logger.error(f"Unexpected error initializing SQLChatbot: {str(e)}")
                     raise HTTPException(
                         status_code=500,
                         detail="An unexpected error occurred while processing the file.",
@@ -842,6 +863,7 @@ async def upload_file(
     logger.info(f"File upload completed. File list: {file_list}")
     return {"fileList": file_list, "message": "Files processed successfully"}
 
+
 @app.get("/files/")
 async def get_uploaded_files(
     chat_id: Optional[str] = None,  # Optional chat_id to filter files
@@ -868,6 +890,7 @@ async def get_uploaded_files(
         for f in files
     ]
     return {"fileList": file_list}
+
 
 @app.get("/file/{file_id}")
 async def get_file_data(
@@ -948,6 +971,7 @@ async def get_file_data(
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
+
 @app.get("/history/{chat_id}")
 async def get_chat_history(
     chat_id: str,
@@ -993,6 +1017,7 @@ async def get_chat_history(
         }
     else:
         raise HTTPException(status_code=404, detail="Chat not found")
+
 
 @app.get("/metadata/{file_id}")
 async def get_metadata(
@@ -1080,6 +1105,7 @@ async def get_metadata(
             status_code=500, detail="Error fetching metadata. Please try again."
         )
 
+
 # Serve HTML pages
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
@@ -1089,6 +1115,7 @@ async def read_root():
     with open("templates/index.html", encoding="UTF-8") as f:
         return f.read()
 
+
 @app.get("/index.html", response_class=HTMLResponse)
 async def read_index_html():
     """
@@ -1096,6 +1123,7 @@ async def read_index_html():
     """
     with open("templates/index.html", encoding="UTF-8") as f:
         return f.read()
+
 
 @app.get("/login.html", response_class=HTMLResponse)
 async def read_login():
@@ -1105,6 +1133,7 @@ async def read_login():
     with open("templates/login.html", encoding="UTF-8") as f:
         return f.read()
 
+
 @app.get("/signup.html", response_class=HTMLResponse)
 async def read_signup():
     """
@@ -1112,6 +1141,7 @@ async def read_signup():
     """
     with open("templates/signup.html", encoding="UTF-8") as f:
         return f.read()
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=3939, reload=True)
