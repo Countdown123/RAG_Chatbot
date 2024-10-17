@@ -1,9 +1,10 @@
 # models.py
 
-from sqlalchemy import Column, Integer, String, ForeignKey, Text
+from sqlalchemy import Column, Integer, VARCHAR, DateTime, String, ForeignKey, Text
+from datetime import datetime
 from sqlalchemy.orm import relationship
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 
 from database import Base
 

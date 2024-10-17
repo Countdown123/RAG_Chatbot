@@ -32,6 +32,11 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 
+from langchain_openai import ChatOpenAI
+from langchain_community.agent_toolkits import create_sql_agent
+from langchain_community.utilities import SQLDatabase
+from langchain_community.document_loaders import PyPDFLoader
+
 from dotenv import load_dotenv
 import logging
 
@@ -46,6 +51,7 @@ from models import *
 from metadata import SQLChatbot
 
 from graph import (
+    process_files,
     create_qa_workflow,
     GraphState,
     process_query,
@@ -453,6 +459,22 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(f"Chat {chat_id} started.")
                 welcome_message = "New chat started. How can I help you?"
                 await websocket.send_text(welcome_message)
+
+                # *** Add the welcome message to the messages list ***
+                received_message = {
+                    "type": "received",
+                    "content": welcome_message,
+                    "timestamp": datetime.now().isoformat(),
+                }
+                messages.append(received_message)
+
+                # *** Update the database with the new message ***
+                db_chat.messages = json.dumps(messages)
+                db.commit()
+
+                # *** Save the updated chat history to JSON file ***
+                save_chat_history_to_file(user.id, chat_id, messages)
+
                 graph_state = None  # Reset graph state for new chat
                 logger.info(f"Graph state initialized to None for new chat: {chat_id}")
             else:
@@ -508,7 +530,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                             metadata_record.file_metadata
                                         )
                                         index_name = file_metadata.get("index_name")
-                                        logger.info(f"index_name 값: {index_name}")
+                                        logger.info(f"index_name value: {index_name}")
 
                                         if not index_name:
                                             raise HTTPException(
@@ -546,11 +568,11 @@ async def websocket_endpoint(websocket: WebSocket):
                                             page_numbers = result.get(
                                                 "page_numbers", []
                                             )
-                                            response = f"""답변:
-                                            {answer}
+                                            response = f"""Answer:
+{answer}
 
-                                            확인된 페이지:
-                                            {', '.join(map(str, page_numbers))}"""
+Pages referenced:
+{', '.join(map(str, page_numbers))}"""
                                         else:
                                             response = "Error: Pinecone index name not found for this PDF file."
                                     else:

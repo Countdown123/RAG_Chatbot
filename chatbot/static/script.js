@@ -54,8 +54,8 @@ function setupLogoutButton() {
 
 // Initialize WebSocket connection with the token
 function initializeWebSocket(token) {
-    // const ws = new WebSocket(`ws://127.0.0.1:3939/ws?token=${token}`);
-    const ws = new WebSocket(`wss://rag-chatbot-t20p.onrender.com/ws?token=${token}`);
+    const ws = new WebSocket(`ws://127.0.0.1:3939/ws?token=${token}`);
+    // const ws = new WebSocket(`wss://rag-chatbot-t20p.onrender.com/ws?token=${token}`);
     window.ws = ws;
 
     ws.onopen = () => {
@@ -66,6 +66,7 @@ function initializeWebSocket(token) {
 
     ws.onmessage = (event) => {
         const data = event.data;
+        
         if (data.startsWith("Chat ") && data.endsWith(" started.")) {
             // Extract chat_id from the message
             const chat_id = data.split("Chat ")[1].split(" started.")[0];
@@ -198,8 +199,27 @@ function receiveMessage(message) {
         alert("Received a message without an active chat session.");
         return;
     }
-    addMessageToDisplay(message, "received");  // Display the received message
+
+    if (loadingMessageElement) {
+        // Replace the loading message content with the actual message
+        loadingMessageElement.textContent = message;
+        // Optionally, you can process the message further (e.g., formatting)
+        loadingMessageElement = null; // Reset the loading message element
+    } else {
+        // If for some reason there's no loading message, just add it normally
+        addMessageToDisplay(message, "received");
+    }
+
+    // Save the message in the current chat history
+    if (currentChatId) {
+        if (!chatHistories[currentChatId]) {
+            chatHistories[currentChatId] = [];
+        }
+        chatHistories[currentChatId].push({ type: "received", content: message, timestamp: new Date().toISOString().toLocaleString() });
+        updateChatHistoryEntry(currentChatId, new Date().toLocaleString(), chatHistories[currentChatId].length);
+    }
 }
+
 
 // Append a message to the chat window and save in chat history
 function addMessageToDisplay(text, type) {
@@ -267,9 +287,6 @@ function startNewChat() {
     // Notify the server about the new chat session
     window.ws.send(`new_chat:${newChatId}`);
 
-    // Display the welcome message in the UI
-    addMessageToDisplay(welcomeMessage, "received");
-
     // Add the new chat to the history list
     const timestamp = new Date().toLocaleString();
     createNewChatHistoryEntry(currentChatId, timestamp);
@@ -278,6 +295,7 @@ function startNewChat() {
     fetchChatList();
 
     loadChatContent(currentChatId);
+
 }
 
 // Save chat history to the backend
@@ -323,7 +341,34 @@ function sendMessage(event) {
 
     // Clear the input field
     messageInput.value = "";
+
+    // Add placeholder message from assistant
+    addLoadingMessage();
 }
+
+let loadingMessageElement = null; // Keep track of the loading message element
+
+function addLoadingMessage() {
+    const messagesContainer = document.getElementById("messages");
+    if (!messagesContainer) return;
+
+    // Create the loading message element
+    loadingMessageElement = document.createElement("li");
+    loadingMessageElement.classList.add("received"); // Style as a received message
+
+    // You can use a spinner or text
+    loadingMessageElement.innerHTML = `
+        <div class="loading-indicator">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+        </div>
+    `;
+
+    messagesContainer.appendChild(loadingMessageElement);
+    scrollToBottom(messagesContainer);
+}
+
 
 // Set up the file upload form submit functionality
 function setupUploadForm() {
