@@ -1,6 +1,6 @@
 # 🤖 RetrieveR
 <p align="center">
-  <img src="https://github.com/Countdown123/RAG_Chatbot/blob/main/chatbot/static/retriever.png"/>
+  <img src="https://github.com/Countdown123/RAG_Chatbot/blob/main/chatbot/static/retriever.png" width="384" height="384"/>
 </p>
 
 
