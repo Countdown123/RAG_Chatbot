@@ -1,3 +1,5 @@
+# graph.py
+
 import pdfplumber
 from langchain.docstore.document import Document
 from langchain_community.vectorstores import Pinecone
@@ -19,14 +21,24 @@ import json
 import unicodedata
 from difflib import SequenceMatcher
 
-
+# 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MAX_TOKENS = 110000
 
-
 def find_most_similar_speaker(query, speaker_list, threshold=0.6):
+    """
+    주어진 쿼리와 가장 유사한 발언자를 찾습니다.
+
+    Args:
+        query (str): 검색할 발언자 이름.
+        speaker_list (List[str]): 발언자 이름 목록.
+        threshold (float): 유사도 임계값.
+
+    Returns:
+        str or None: 가장 유사한 발언자 이름 또는 None.
+    """
     query = unicodedata.normalize("NFC", query)
     best_match = None
     highest_ratio = 0
@@ -42,8 +54,18 @@ def find_most_similar_speaker(query, speaker_list, threshold=0.6):
         return best_match
     return None
 
-
 def find_most_similar_item(query, item_list, threshold=0.6):
+    """
+    주어진 쿼리와 가장 유사한 아이템을 찾습니다.
+
+    Args:
+        query (str): 검색할 아이템 이름.
+        item_list (List[str]): 아이템 이름 목록.
+        threshold (float): 유사도 임계값.
+
+    Returns:
+        str or None: 가장 유사한 아이템 이름 또는 None.
+    """
     best_match = None
     highest_ratio = 0
 
@@ -54,7 +76,6 @@ def find_most_similar_item(query, item_list, threshold=0.6):
             best_match = item
 
     return best_match if highest_ratio >= threshold else None
-
 
 class GraphState(TypedDict):
     question: str
@@ -81,8 +102,16 @@ class GraphState(TypedDict):
     completed: bool
     search_filters: List[Dict[str, Any]]
 
-
 def data_input_node(state: GraphState) -> GraphState:
+    """
+    데이터 입력 노드입니다. 파일 경로를 확인하고 다음 노드를 결정합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        GraphState: 업데이트된 상태.
+    """
     file_paths = state["file_paths"]
 
     logging.info(f"Received file paths: {file_paths}")
@@ -146,8 +175,16 @@ def data_input_node(state: GraphState) -> GraphState:
         next_node=next_node,
     )
 
-
 def pdf_processing_with_speaker(state: GraphState) -> GraphState:
+    """
+    발언자가 있는 PDF를 처리합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        GraphState: 업데이트된 상태.
+    """
     print("발언자가 있는 PDF입니다")
     all_documents = []
     metadata = {}
@@ -213,8 +250,16 @@ def pdf_processing_with_speaker(state: GraphState) -> GraphState:
 
     return GraphState(processed_data=all_documents, pdfs_loaded=True, metadata=metadata)
 
-
 def pdf_processing_without_speaker(state: GraphState) -> GraphState:
+    """
+    발언자가 없는 PDF를 처리합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        GraphState: 업데이트된 상태.
+    """
     print("발언자가 없는 PDF입니다")
 
     all_documents = []
@@ -250,8 +295,16 @@ def pdf_processing_without_speaker(state: GraphState) -> GraphState:
 
     return GraphState(processed_data=all_documents, pdfs_loaded=True, metadata=metadata)
 
-
 def vector_storage_node(state: GraphState) -> GraphState:
+    """
+    벡터 저장 노드입니다. 처리된 데이터를 벡터스토어에 저장합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        GraphState: 업데이트된 상태.
+    """
     load_dotenv()
     pinecone = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
     file_paths = state["file_paths"]
@@ -309,8 +362,16 @@ def vector_storage_node(state: GraphState) -> GraphState:
         logger.error(f"Error in vector storage: {str(e)}")
         return GraphState(error=str(e), completed=True)
 
-
 def chat_interface_node(state: GraphState) -> GraphState:
+    """
+    채팅 인터페이스 노드입니다. 질문을 분석하고 다음 노드를 결정합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        GraphState: 업데이트된 상태.
+    """
     query = state["question"]
     new_metadata = state.get("metadata", {})
 
@@ -345,7 +406,8 @@ def chat_interface_node(state: GraphState) -> GraphState:
 
     client = wrap_openai(openai.Client())
     analysis_response = client.chat.completions.create(
-        model="gpt-4", messages=[{"role": "user", "content": analysis_prompt}]
+        model="gpt-4",
+        messages=[{"role": "user", "content": analysis_prompt}]
     )
     analysis_result = analysis_response.choices[0].message.content
 
@@ -380,8 +442,8 @@ def chat_interface_node(state: GraphState) -> GraphState:
                 most_similar_speaker = find_most_similar_speaker(speakers, speaker_list)
                 if most_similar_speaker:
                     specific_speakers = [most_similar_speaker]
-            logger.info(f"Query: {speakers}")
-            logger.info(f"메타데이터에서 매칭된 발언자: {specific_speakers}")
+                logger.info(f"Query: {speakers}")
+                logger.info(f"메타데이터에서 매칭된 발언자: {specific_speakers}")
     all_files = old_metadata.get("file_names", [])
 
     search_filters = []
@@ -429,8 +491,18 @@ def chat_interface_node(state: GraphState) -> GraphState:
     return GraphState(
         question=query, search_filters=search_filters, next_node=next_node
     )
+
 @traceable()
 def query_processing_with_speaker(state: GraphState) -> GraphState:
+    """
+    발언자 필터가 적용된 질문을 처리합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        GraphState: 업데이트된 상태.
+    """
     query = state['question']
     index_name = state['db']
     search_filters = state['search_filters']
@@ -697,6 +769,15 @@ def query_processing_with_filter(state: GraphState) -> GraphState:
 
 @traceable()
 def query_processing_without_filter(state: GraphState) -> GraphState:
+    """
+    필터 없이 질문을 처리합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        GraphState: 업데이트된 상태.
+    """
     query = state['question']
     index_name = state['db']
 
@@ -827,7 +908,6 @@ def query_processing_without_filter(state: GraphState) -> GraphState:
         completed=True
     )
 
-
 def route_by_file_type(state: GraphState) -> str:
     file_types = state["file_types"]
 
@@ -843,24 +923,53 @@ def route_by_file_type(state: GraphState) -> str:
 def route_by_query_type(state: GraphState) -> str:
     return state["next_node"]
 
-
 def route_by_file_type(state: GraphState) -> str:
+    """
+    파일 유형에 따라 다음 노드를 결정합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        str: 다음 노드 이름.
+    """
     return state["next_node"]
 
-
 def should_continue(state: GraphState) -> bool:
+    """
+    처리를 계속할지 여부를 결정합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        bool: 계속할지 여부.
+    """
     return state["question"] != "" and not state.get("completed", False)
 
-
 def should_end(state: GraphState) -> bool:
+    """
+    처리를 종료할지 여부를 결정합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        bool: 종료할지 여부.
+    """
     return (
         state.get("next_question", False)
         or state["question"] == ""
         or state.get("completed", False)
     )
 
-
 def create_file_processing_workflow():
+    """
+    파일 처리 워크플로우를 생성합니다.
+
+    Returns:
+        Compiled workflow graph.
+    """
     workflow = StateGraph(GraphState)
 
     workflow.add_node("data_input", data_input_node)
@@ -892,8 +1001,13 @@ def create_file_processing_workflow():
     logger.debug("File processing workflow created")
     return workflow.compile()
 
-
 def create_qa_workflow():
+    """
+    QA 워크플로우를 생성합니다.
+
+    Returns:
+        Compiled workflow graph.
+    """
     workflow = StateGraph(GraphState)
 
     workflow.add_node("chat_interface", chat_interface_node)
@@ -930,8 +1044,19 @@ def create_qa_workflow():
     workflow.set_entry_point("chat_interface")
     return workflow.compile()
 
-
 def process_files(file_paths: List[str]) -> str:
+    """
+    파일들을 처리합니다.
+
+    Args:
+        file_paths (List[str]): 파일 경로 목록.
+
+    Returns:
+        str: 데이터베이스 인덱스 이름.
+
+    Raises:
+        ValueError: 처리 중 오류 발생 시.
+    """
     workflow = create_file_processing_workflow()
     state = GraphState(
         file_paths=file_paths,
@@ -947,8 +1072,16 @@ def process_files(file_paths: List[str]) -> str:
 
     raise ValueError("파일 처리 중 오류가 발생했습니다.")
 
-
 def process_query(state: GraphState) -> Dict:
+    """
+    사용자의 질문을 처리합니다.
+
+    Args:
+        state (GraphState): 현재 상태.
+
+    Returns:
+        Dict: 답변과 관련 정보.
+    """
     workflow = create_qa_workflow()
 
     for output in workflow.stream(state):
