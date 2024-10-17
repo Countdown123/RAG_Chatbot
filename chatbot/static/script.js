@@ -262,11 +262,16 @@ function startNewChat() {
     // Clear the current chat display and input field
     document.getElementById("messages").innerHTML = "";
     document.getElementById("messageText").value = "";
+
     // Notify the server about the new chat session
     window.ws.send(`new_chat:${newChatId}`);
 
-    // Display a welcome message for the new chat
-    addMessageToDisplay("New chat started. How can I help you?", "received");
+    // Hardcoded welcome message sent through WebSocket
+    const welcomeMessage = "New chat started. How can I help you?";
+    window.ws.send(welcomeMessage);
+
+    // Display the welcome message in the UI
+    addMessageToDisplay(welcomeMessage, "received");
 
     // Add the new chat to the history list
     const timestamp = new Date().toLocaleString();
@@ -276,9 +281,8 @@ function startNewChat() {
     fetchChatList();
     
     loadChatContent(currentChatId);
-    // fetchChatList();
-
 }
+
 
 // Save chat history to the backend
 function saveChatHistory(chatId) {
