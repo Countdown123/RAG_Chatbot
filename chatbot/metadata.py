@@ -1,3 +1,5 @@
+# metadata.py
+
 import os
 import re
 import pandas as pd
@@ -19,8 +21,18 @@ from collections import Counter
 
 
 class SQLChatbot:
+    """
+    A chatbot that interfaces with a SQL database created from a given file.
+    """
 
     def __init__(self, file_path, sanitized_filename=None):
+        """
+        Initialize the SQLChatbot with the given file path.
+
+        Args:
+            file_path (str): Path to the data file.
+            sanitized_filename (str, optional): Sanitized file name. Defaults to None.
+        """
         self.file_path = file_path
         self.file_name = sanitized_filename or self._get_file_name()
         self.table_name = self._get_table_name()
@@ -38,10 +50,22 @@ class SQLChatbot:
         self.exception_words = self._extract_exception_words()
 
     def _get_file_name(self):
+        """
+        Extract the file name from the file path.
+
+        Returns:
+            str: Sanitized file name.
+        """
         base_name = os.path.basename(self.file_path)
         return "".join(e for e in base_name if e.isalnum() or e in [".", "_"])
 
     def _get_table_name(self):
+        """
+        Generate a valid table name for SQL from the file name.
+
+        Returns:
+            str: Table name.
+        """
         table_name = re.sub(r"\W+", "_", self.file_name)
         table_name = re.sub(r"^_+|_+$", "", table_name)
         if table_name[0].isdigit():
@@ -49,6 +73,15 @@ class SQLChatbot:
         return table_name
 
     def _determine_model(self):
+        """
+        Determine the appropriate model based on the file extension.
+
+        Returns:
+            str: Model name.
+
+        Raises:
+            ValueError: If the file extension is unsupported.
+        """
         if self.file_path.endswith(".csv"):
             return "gpt-4o"
         elif self.file_path.endswith(".xls") or self.file_path.endswith(".xlsx"):
@@ -59,6 +92,15 @@ class SQLChatbot:
             )
 
     def _load_data(self):
+        """
+        Load data from the file into a pandas DataFrame.
+
+        Returns:
+            pd.DataFrame: Loaded data.
+
+        Raises:
+            ValueError: If the file cannot be read or is empty.
+        """
         try:
             if self.file_path.endswith(".csv"):
                 encodings = ["utf-8", "cp949", "euc-kr", "iso-8859-1"]
@@ -89,6 +131,15 @@ class SQLChatbot:
             raise ValueError(f"파일을 불러오는 중 오류가 발생했습니다: {str(e)}")
 
     def _create_database(self):
+        """
+        Create a SQLite database from the DataFrame.
+
+        Returns:
+            sqlite3.Connection: Database connection.
+
+        Raises:
+            ValueError: If the table cannot be created.
+        """
         conn = sqlite3.connect(f"{self.file_name}.db")
         self.df.to_sql(self.table_name, conn, index=False, if_exists="replace")
 
@@ -102,6 +153,15 @@ class SQLChatbot:
         return conn
 
     def _create_sql_database(self):
+        """
+        Create a SQLDatabase instance for the agent.
+
+        Returns:
+            SQLDatabase: SQLDatabase instance.
+
+        Raises:
+            ValueError: If the database cannot be connected.
+        """
         db_path = f"sqlite:///{self.file_name}.db"
         try:
             db = SQLDatabase.from_uri(db_path)
@@ -111,6 +171,12 @@ class SQLChatbot:
             raise ValueError(f"Failed to create SQLDatabase: {str(e)}")
 
     def _create_prompt(self):
+        """
+        Create a custom prompt for the agent.
+
+        Returns:
+            ChatPromptTemplate: The prompt template.
+        """
         cursor = self.conn.cursor()
         cursor.execute(f"PRAGMA table_info({self.table_name})")
         columns = [info[1] for info in cursor.fetchall()]
@@ -134,6 +200,12 @@ The table name is '{self.table_name}' and it has the following columns: {columns
         return prompt
 
     def _initialize_agent_executor(self):
+        """
+        Initialize the agent executor with the LLM and toolkit.
+
+        Returns:
+            AgentExecutor: The agent executor.
+        """
         agent_executor = initialize_agent(
             agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
             llm=self.llm,
@@ -147,18 +219,33 @@ The table name is '{self.table_name}' and it has the following columns: {columns
         return agent_executor
 
     def _extract_exception_words(self):
+        """
+        Extract exception words to avoid during translation.
+
+        Returns:
+            list: List of exception words.
+        """
         exception_words = set()
-        # 컬럼명 추가
+        # Add column names
         exception_words.update(self.df.columns)
-        # 각 컬럼의 고유한 값들 추가
+        # Add unique values from each column
         for column in self.df.columns:
             exception_words.update(self.df[column].astype(str).unique())
         return list(exception_words)
 
     def process_response(self, response):
+        """
+        Process the agent's response to handle translations.
+
+        Args:
+            response (str): The agent's response.
+
+        Returns:
+            str: Processed and translated response.
+        """
         translator = GoogleTranslator(source="auto", target="ko")
 
-        # 예외 단어들을 위한 임시 플레이스홀더 생성
+        # Create placeholders for exception words
         placeholders = {}
         for idx, word in enumerate(self.exception_words):
             placeholder = f"__EXCEPTION_{idx}__"
@@ -170,16 +257,26 @@ The table name is '{self.table_name}' and it has the following columns: {columns
                 flags=re.IGNORECASE,
             )
 
-        # 번역 수행
+        # Perform translation
         translated = translator.translate(response)
 
-        # 플레이스홀더를 원래 단어로 대체
+        # Replace placeholders with original words
         for word, placeholder in placeholders.items():
             translated = translated.replace(placeholder, word)
 
         return translated
 
     def ask_question(self, question, num_trials=3):
+        """
+        Ask a question to the chatbot and get the response.
+
+        Args:
+            question (str): The user's question.
+            num_trials (int, optional): Number of trials for the response. Defaults to 3.
+
+        Returns:
+            str: The most common response from the trials.
+        """
         responses = []
         total_tokens_used = 0
         for i in range(num_trials):

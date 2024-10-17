@@ -1,3 +1,5 @@
+# user_router.py
+
 from sqlalchemy.orm import Session
 from database import get_db
 
@@ -18,10 +20,21 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
+# Create a new APIRouter instance with a prefix
 app = APIRouter(prefix="/user")
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
+    """
+    Create a JWT access token.
+
+    Args:
+        data (dict): The data to include in the token payload.
+        expires_delta (timedelta | None, optional): The expiration time delta.
+
+    Returns:
+        str: The encoded JWT token.
+    """
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now() + expires_delta
@@ -34,6 +47,16 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
 
 @app.post(path="/signup")
 async def signup(new_user: user_schema.NewUserForm, db: Session = Depends(get_db)):
+    """
+    Endpoint for user signup.
+
+    Args:
+        new_user (user_schema.NewUserForm): The new user's data.
+        db (Session): Database session dependency.
+
+    Returns:
+        HTTPException: HTTP response indicating the result.
+    """
     # 회원 존재 여부 확인
     user = user_crud.get_user(new_user.user_name, db)
 
@@ -54,6 +77,17 @@ async def login(
     login_form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
+    """
+    Endpoint for user login.
+
+    Args:
+        response (Response): Response object to set cookies.
+        login_form (OAuth2PasswordRequestForm): Form data for login.
+        db (Session): Database session dependency.
+
+    Returns:
+        user_schema.Token: Access token information.
+    """
     # 회원 존재 여부 확인
     user = user_crud.get_user(login_form.username, db)
 
@@ -89,6 +123,16 @@ async def login(
 
 @app.get(path="/logout")
 async def logout(response: Response, request: Request):
+    """
+    Endpoint for user logout.
+
+    Args:
+        response (Response): Response object to modify cookies.
+        request (Request): Request object to access cookies.
+
+    Returns:
+        HTTPException: HTTP response indicating the result.
+    """
     access_token = request.cookies.get("access_token")
 
     # 쿠키 삭제

@@ -1,23 +1,24 @@
-// static/script.js
+// script.js
 
 // Utility function to generate UUID (for unique chat IDs)
-function generateUUID() { // Public Domain/MIT
-    var d = new Date().getTime();//Timestamp
-    var d2 = (performance && performance.now && (performance.now()*1000)) || 0;//Time in microseconds since page-load or 0 if unsupported
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        var r = Math.random() * 16;//random number between 0 and 16
-        if(d > 0){
-            r = (d + r)%16 | 0;
-            d = Math.floor(d/16);
+function generateUUID() {
+    // Public Domain/MIT
+    var d = new Date().getTime(); // Timestamp
+    var d2 = (performance && performance.now && (performance.now() * 1000)) || 0; // Time in microseconds since page-load or 0 if unsupported
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = Math.random() * 16; // Random number between 0 and 16
+        if (d > 0) {
+            r = (d + r) % 16 | 0;
+            d = Math.floor(d / 16);
         } else {
-            r = (d2 + r)%16 | 0;
-            d2 = Math.floor(d2/16);
+            r = (d2 + r) % 16 | 0;
+            d2 = Math.floor(d2 / 16);
         }
-        return (c==='x' ? r : (r&0x3|0x8)).toString(16);
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
     });
 }
 
-// Initialize the application
+// Initialize the application when the DOM is fully loaded
 document.addEventListener("DOMContentLoaded", function () {
     const accessToken = localStorage.getItem("accessToken");
 
@@ -39,7 +40,7 @@ function redirectToLogin() {
     window.location.href = "/login.html";
 }
 
-// Handle logout
+// Handle logout functionality
 function setupLogoutButton() {
     const logoutBtn = document.getElementById("logoutBtn");
     if (logoutBtn) {
@@ -125,7 +126,7 @@ function fetchChatList() {
         });
 }
 
-// Update the chat list display
+// Update the chat list display in the UI
 function updateChatListDisplay(chatList) {
     const chatHistoryList = document.getElementById("chatHistory");
     if (!chatHistoryList) return;
@@ -275,10 +276,9 @@ function startNewChat() {
 
     // Refresh the chat list
     fetchChatList();
-    
+
     loadChatContent(currentChatId);
 }
-
 
 // Save chat history to the backend
 function saveChatHistory(chatId) {
@@ -450,7 +450,7 @@ async function uploadFile() {
 
             const uploadResponse = await fetch("/upload/", {
                 method: "POST",
-                headers: { 
+                headers: {
                     "Authorization": `Bearer ${accessToken}`
                 },
                 body: formData,
@@ -470,7 +470,7 @@ async function uploadFile() {
     }
 }
 
-// 파일 업로드 후 처리 함수 수정 (메타데이터 표시 제거)
+// Handle the response after file upload (metadata display removed)
 function handleFileUploadResponse(response) {
     if (response.status === 401) {
         alert("Session expired. Please log in again.");
@@ -496,7 +496,6 @@ function handleFileUploadResponse(response) {
         alert("An error occurred while processing the upload response.");
     });
 }
-
 
 // Fetch the list of uploaded files for the current chat
 function fetchFileList(chatId = null) {
@@ -536,7 +535,7 @@ function fetchFileList(chatId = null) {
         });
 }
 
-// Update the file list display
+// Update the file list display in the UI
 function updateFileListDisplay(fileList) {
     console.log("Updating file list display:", fileList);
     const fileListContainer = document.getElementById("fileList");
@@ -557,10 +556,10 @@ function updateFileListDisplay(fileList) {
     });
 
     // Ensure the file list container is visible
-    document.getElementById("fileListContainer").style.display = "block";  
+    document.getElementById("fileListContainer").style.display = "block";
 }
 
-// 파일 리스트 아이템 생성 함수 수정
+// Create a list item for each file
 function createFileListItem(file) {
     const listItem = document.createElement("li");
     listItem.textContent = `${file.filename} (Uploaded on ${file.upload_time})`;
@@ -575,7 +574,7 @@ function createFileListItem(file) {
     return listItem;
 }
 
-// PDF 파일 클릭 시 메타데이터 조회 및 표시
+// On clicking a PDF file, fetch and display metadata
 function fetchAndShowMetadata(fileId, filename) {
     const accessToken = localStorage.getItem("accessToken");
 
@@ -625,7 +624,7 @@ function fetchAndShowMetadata(fileId, filename) {
 function fetchFileData(fileId, filename) {
     const accessToken = localStorage.getItem("accessToken");
     console.log(`Fetching data for file: ${filename} (ID: ${fileId})`);
-    
+
     showLoadingScreen("Fetching file data...");  // Show loading screen
 
     fetch(`/file/${fileId}`, {
@@ -799,7 +798,7 @@ function setupNewChatButton() {
     }
 }
 
-// Display chat messages
+// Display chat messages in the chat window
 function displayChatMessages(messages) {
     const messagesContainer = document.getElementById("messages");
     if (!messagesContainer) return;
@@ -836,10 +835,10 @@ function displayChatFiles(files) {
     });
 
     // Ensure the file list container is visible
-    document.getElementById("fileListContainer").style.display = "block";  
+    document.getElementById("fileListContainer").style.display = "block";
 }
 
-// 메타데이터 테이블 초기화 함수
+// Clear the metadata table if it exists
 function clearMetadataTable() {
     const existingTable = document.getElementById("metadataTable");
     if (existingTable) {
@@ -852,7 +851,7 @@ function clearMetadataTable() {
     }
 }
 
-// 메타데이터 테이블 표시 함수
+// Display the metadata in a table format
 function showMetadataTable(metadata) {
     const popup = document.createElement("div");
     popup.classList.add("modal");
@@ -913,19 +912,21 @@ function showMetadataTable(metadata) {
     popup.style.display = 'block';
 }
 
+// Show a loading screen overlay
 function showLoadingScreen() {
     hideLoadingScreen();  // Remove any existing loading screen
-    
+
     const loadingScreen = document.createElement("div");
     loadingScreen.className = "loading-screen";
     loadingScreen.innerHTML = `<div class="spinner"></div>`;
     document.body.appendChild(loadingScreen);
     console.log("Loading screen shown");
-    
+
     // Force a reflow to ensure the loading screen is rendered
     void loadingScreen.offsetWidth;
 }
 
+// Hide the loading screen overlay
 function hideLoadingScreen() {
     const loadingScreen = document.querySelector(".loading-screen");
     if (loadingScreen) {
@@ -937,6 +938,7 @@ function hideLoadingScreen() {
     }
 }
 
+// Check if the loading screen is present in the DOM (for debugging)
 function checkLoadingScreen() {
     setTimeout(() => {
         const loadingScreen = document.querySelector('.loading-screen');

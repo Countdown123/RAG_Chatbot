@@ -1,20 +1,29 @@
-from pydantic import BaseModel, field_validator
+# user_schema.py
 
+from pydantic import BaseModel, field_validator
 from fastapi import HTTPException
 
-
 class NewUserForm(BaseModel):
+    """
+    Pydantic model for new user registration form.
+    """
     user_name: str
     password: str
 
     @field_validator("user_name", "password")
     def check_empty(cls, v):
+        """
+        Validator to check if the fields are empty or contain only whitespace.
+        """
         if not v or v.isspace():
             raise HTTPException(status_code=422, detail="필수 항목을 입력해주세요.")
         return v
 
     @field_validator("password")
     def validate_password(cls, v):
+        """
+        Validator to ensure the password meets the required criteria.
+        """
         if len(v) < 8:
             raise HTTPException(
                 status_code=422,
@@ -35,7 +44,9 @@ class NewUserForm(BaseModel):
 
         return v
 
-
 class Token(BaseModel):
+    """
+    Pydantic model for authentication token.
+    """
     access_token: str
     token_type: str
