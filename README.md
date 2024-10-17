@@ -50,7 +50,7 @@ Ask questions through the interactive chatbot, and receive real-time answers bas
 Check the runtime.txt file to see the required Python version and set up the environment accordingly.
 
 ### 5. Replace API Keys
-Paste your API keys in chatbot/.env
+Paste your API keys in `chatbot/.env`
 
     OPENAI_API_KEY = ""
     PINECONE_API_KEY = ""
