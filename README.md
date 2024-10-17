@@ -49,10 +49,16 @@ Ask questions through the interactive chatbot, and receive real-time answers bas
 ### 4. Set up runtime environment
 Check the runtime.txt file to see the required Python version and set up the environment accordingly.
 
-### 5. Start the server
+### 5. Replace API Keys
+Paste your API keys in chatbot/.env
+
+    OPENAI_API_KEY = ""
+    PINECONE_API_KEY = ""
+
+### 6. Start the server
 Run the FastAPI server locally.
 
     python main.py
 
-### 6. Get started on web browser
+### 7. Get started on web browser
 Open http://127.0.0.1:3939/
