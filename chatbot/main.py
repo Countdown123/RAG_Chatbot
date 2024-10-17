@@ -29,7 +29,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import models
 
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 
@@ -38,7 +37,9 @@ import logging
 
 from database import engine, get_db, SessionLocal
 
+# Create database tables
 models.Base.metadata.create_all(bind=engine)
+
 from user.user_crud import *
 from models import *
 
@@ -61,7 +62,7 @@ logger = logging.getLogger(__name__)
 # Disable LangChain tracing to avoid LangSmith authentication errors
 os.environ["LANGCHAIN_TRACING"] = "false"
 
-# Password hashing
+# Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT settings
@@ -72,11 +73,20 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 # OAuth2 setup
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# SQLChatbot setup
+# Initialize SQLChatbot
 sql_chatbot = None
 
-
 def create_access_token(data: dict, expires_delta: timedelta = None):
+    """
+    Create a JWT access token.
+
+    Args:
+        data (dict): Data to include in the token.
+        expires_delta (timedelta, optional): Token expiration time.
+
+    Returns:
+        str: Encoded JWT token.
+    """
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now() + expires_delta
@@ -85,16 +95,29 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-
 async def get_current_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ):
+    """
+    Retrieve the current user based on the JWT token.
+
+    Args:
+        token (str): JWT access token.
+        db (Session): Database session.
+
+    Returns:
+        User: Authenticated user.
+
+    Raises:
+        HTTPException: If authentication fails.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        # Decode the JWT token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
@@ -107,7 +130,6 @@ async def get_current_user(
         raise credentials_exception
     return user
 
-
 # Ensure the 'uploads' directory exists
 if not os.path.exists("uploads"):
     os.makedirs("uploads")
@@ -116,10 +138,10 @@ if not os.path.exists("uploads"):
 if not os.path.exists("data"):
     os.makedirs("data")
 
-# FastAPI app initialization
+# Initialize FastAPI app
 app = FastAPI()
 
-# CORS middleware (if needed)
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Adjust this in production
@@ -128,46 +150,66 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files
+# Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/templates", StaticFiles(directory="templates"), name="templates")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-
-# Connection manager for WebSocket
 class ConnectionManager:
+    """
+    Manages WebSocket connections.
+    """
     def __init__(self):
         self.active_connections: List[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
+        """
+        Accept a new WebSocket connection.
+        """
         await websocket.accept()
         self.active_connections.append(websocket)
         logger.info("Client connected")
 
     def disconnect(self, websocket: WebSocket):
+        """
+        Remove a WebSocket connection.
+        """
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
             logger.info("Client disconnected")
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
+        """
+        Send a message to a specific WebSocket client.
+        """
         await websocket.send_text(message)
         logger.info(f"Sent message to client: {message}")
 
-
+# Initialize connection manager
 manager = ConnectionManager()
-
 
 # Helper functions for chat and file management
 def get_chat_directory(user_id: int, chat_id: str) -> Path:
     """
-    Returns the Path object for a user's specific chat directory.
+    Get the directory path for a user's chat session.
+
+    Args:
+        user_id (int): User ID.
+        chat_id (str): Chat session ID.
+
+    Returns:
+        Path: Directory path.
     """
     return Path(f"uploads/{user_id}/{chat_id}")
 
-
 def save_chat_history_to_file(user_id: int, chat_id: str, messages: List[dict]):
     """
-    Saves the chat messages to a JSON file in the specified format.
+    Save chat messages to a JSON file.
+
+    Args:
+        user_id (int): User ID.
+        chat_id (str): Chat session ID.
+        messages (List[dict]): List of chat messages.
     """
     chat_dir = get_chat_directory(user_id, chat_id)
     chat_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
@@ -176,10 +218,16 @@ def save_chat_history_to_file(user_id: int, chat_id: str, messages: List[dict]):
         json.dump(messages, f, indent=4)
     logger.info(f"Chat history saved to {chat_history_file}")
 
-
 def load_chat_history_from_file(user_id: int, chat_id: str) -> List[dict]:
     """
-    Loads the chat messages from the JSON file.
+    Load chat messages from a JSON file.
+
+    Args:
+        user_id (int): User ID.
+        chat_id (str): Chat session ID.
+
+    Returns:
+        List[dict]: List of chat messages.
     """
     chat_history_file = (
         get_chat_directory(user_id, chat_id) / f"{user_id}-{chat_id}-chat_history.json"
@@ -190,11 +238,20 @@ def load_chat_history_from_file(user_id: int, chat_id: str) -> List[dict]:
         messages = json.load(f)
     return messages
 
-
 def save_uploaded_file(user_id: int, chat_id: str, file: UploadFile) -> str:
     """
-    Saves the uploaded file to the appropriate chat directory and returns the file path.
-    Ensures the extension is lowercase '.pdf' regardless of the original case.
+    Save an uploaded file to the server.
+
+    Args:
+        user_id (int): User ID.
+        chat_id (str): Chat session ID.
+        file (UploadFile): Uploaded file.
+
+    Returns:
+        str: File path.
+
+    Raises:
+        HTTPException: If the file is empty.
     """
     chat_dir = get_chat_directory(user_id, chat_id)
     files_dir = chat_dir / "files"
@@ -203,8 +260,8 @@ def save_uploaded_file(user_id: int, chat_id: str, file: UploadFile) -> str:
     # Normalize the filename for PDF files
     filename = file.filename
     name, ext = os.path.splitext(filename)
-    if ext.lower() == ".pdf":  # PDF 확장자를 대소문자 관계없이 처리
-        filename = name + ".pdf"  # 확장자를 소문자 .pdf로 변환
+    if ext.lower() == ".pdf":  # Handle PDF extension case-insensitively
+        filename = name + ".pdf"  # Convert extension to lowercase .pdf
 
     file_path = files_dir / filename
     logger.info(f"Saving file to path: {file_path}")
@@ -223,12 +280,11 @@ def save_uploaded_file(user_id: int, chat_id: str, file: UploadFile) -> str:
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # 파일 포인터를 처음으로 되돌려서 이후에도 사용할 수 있게 함
-    file.file.seek(0)  # 포인터를 처음으로 돌림
+    # Reset the file pointer
+    file.file.seek(0)  # Move pointer back to the beginning
 
     logger.info(f"File {filename} saved successfully to {file_path}")
     return str(file_path)
-
 
 # Routes
 @app.post("/users/")
@@ -240,7 +296,18 @@ async def create_user_endpoint(
 ):
     """
     Endpoint to create a new user.
-    Validates that password and confirm_password match.
+
+    Args:
+        email (str): User email.
+        password (str): User password.
+        confirm_password (str): Password confirmation.
+        db (Session): Database session.
+
+    Returns:
+        dict: Success message.
+
+    Raises:
+        HTTPException: If passwords do not match or email is already registered.
     """
     if password != confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
@@ -251,7 +318,6 @@ async def create_user_endpoint(
     create_user(db, user_create)
     return {"message": "User created successfully"}
 
-
 @app.post("/token", response_model=Token)
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -259,7 +325,16 @@ async def login_for_access_token(
 ):
     """
     Endpoint for user login.
-    Returns a JWT access token upon successful authentication.
+
+    Args:
+        form_data (OAuth2PasswordRequestForm): Form data containing username and password.
+        db (Session): Database session.
+
+    Returns:
+        Token: JWT access token.
+
+    Raises:
+        HTTPException: If authentication fails.
     """
     user = authenticate_user(db, email=form_data.username, password=form_data.password)
     if not user:
@@ -270,15 +345,20 @@ async def login_for_access_token(
     )
     return Token(access_token=access_token, token_type="bearer")
 
-
 @app.get("/chats/", response_model=List[ChatMetadata])
 async def get_chats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Endpoint to retrieve all chat sessions for the current user.
-    Returns a list of chat metadata including chat_id, timestamp, and message count.
+    Retrieve all chat sessions for the current user.
+
+    Args:
+        current_user (User): Authenticated user.
+        db (Session): Database session.
+
+    Returns:
+        List[ChatMetadata]: List of chat metadata.
     """
     chats = db.query(ChatHistory).filter(ChatHistory.user_id == current_user.id).all()
     chat_list = [
@@ -291,14 +371,20 @@ async def get_chats(
     ]
     return chat_list
 
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time communication.
+
+    Args:
+        websocket (WebSocket): WebSocket connection.
+    """
     token = websocket.query_params.get("token")
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     try:
+        # Authenticate user via JWT token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email = payload.get("sub")
         if email is None:
@@ -324,15 +410,15 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_text("OpenAI API Key is not set.")
         return
 
-    qa_workflow = create_qa_workflow()  # 워크플로우를 한 번만 생성
-    graph_state = None  # 그래프 상태를 저장할 변수
+    qa_workflow = create_qa_workflow()  # Initialize QA workflow once
+    graph_state = None  # Initialize graph state
 
     try:
         while True:
             data = await websocket.receive_text()
             logger.info(f"Received message from client: {data}")
             if data.startswith("new_chat:"):
-                # Extract chat_id from the message
+                # Start a new chat session
                 chat_id = data.split("new_chat:")[1]
                 # Create a new ChatHistory in the database
                 db_chat = ChatHistory(
@@ -351,7 +437,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 save_chat_history_to_file(user.id, chat_id, messages)
                 # Send confirmation to client
                 await websocket.send_text(f"Chat {chat_id} started.")
-                graph_state = None  # 새 채팅 시작 시 그래프 상태 초기화
+                graph_state = None  # Reset graph state for new chat
                 logger.info(f"Graph state initialized to None for new chat: {chat_id}")
             else:
                 # Handle normal chat messages
@@ -375,7 +461,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         }
                         messages.append(sent_message)
 
-                        # 파일 타입 확인
+                        # Check for associated files
                         file_query = (
                             db.query(FileModel)
                             .filter(FileModel.chat_id == chat_id)
@@ -387,12 +473,14 @@ async def websocket_endpoint(websocket: WebSocket):
                                 f"File type for chat {chat_id}: {file_extension}"
                             )
                             if file_extension in ["csv", "xlsx", "xls"] and sql_chatbot:
+                                # Handle CSV/XLSX files
                                 try:
                                     response = sql_chatbot.ask_question(data)
                                 except Exception as e:
                                     logger.error(f"Error processing question: {e}")
                                     response = "Sorry, I encountered an error while processing your question."
                             elif file_extension == "pdf":
+                                # Handle PDF files
                                 try:
                                     metadata_record = (
                                         db.query(FileMetadata)
@@ -428,7 +516,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                             else:
                                                 graph_state.question = data
                                                 graph_state.next_node = "chat_interface"
-                                                graph_state.metadata = file_metadata.get('metadata', {})  #
+                                                graph_state.metadata = file_metadata.get('metadata', {})
 
                                                 logger.info(f"Updated graph state: {graph_state}")
 
@@ -493,7 +581,6 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
         db.close()
 
-
 @app.post("/upload/")
 async def upload_file(
     files: List[UploadFile] = File(...),
@@ -501,6 +588,21 @@ async def upload_file(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    """
+    Endpoint to upload files.
+
+    Args:
+        files (List[UploadFile]): List of files to upload.
+        chat_id (str): Chat session ID.
+        current_user (User): Authenticated user.
+        db (Session): Database session.
+
+    Returns:
+        dict: File list and success message.
+
+    Raises:
+        HTTPException: If file upload constraints are violated.
+    """
     # Verify that the chat_id exists for the user
     db_chat = (
         db.query(ChatHistory)
@@ -573,6 +675,12 @@ async def upload_file(
     file_list = []
 
     async def process_pdf(file):
+        """
+        Process and save a PDF file.
+
+        Args:
+            file (UploadFile): Uploaded PDF file.
+        """
         try:
             # Save the uploaded PDF file
             file_path = save_uploaded_file(current_user.id, chat_id, file)
@@ -602,7 +710,7 @@ async def upload_file(
             logger.error(f"Error saving PDF file: {e}")
             raise HTTPException(status_code=500, detail="Failed to save PDF file.")
 
-    # 비동기로 PDF 파일 처리
+    # Asynchronously process PDF files
     tasks = [
         process_pdf(file)
         for file in files
@@ -610,7 +718,7 @@ async def upload_file(
     ]
     await asyncio.gather(*tasks)
 
-    # CSV/XLSX 파일 처리
+    # Process CSV/XLSX files
     for file in files:
         filename = file.filename
         extension = filename.split(".")[-1].lower()
@@ -640,25 +748,24 @@ async def upload_file(
                     }
                 )
 
-                # Process the file based on its type (for CSV/XLSX)
-                if extension in ["xlsx", "xls", "csv"]:
-                    try:
-                        sanitized_filename = "".join(
-                            e for e in filename if e.isalnum() or e in [".", "_"]
-                        )
-                        sql_chatbot = SQLChatbot(file_path, sanitized_filename)
-                        logger.debug(f"SQLChatbot initialized for {filename}")
-                    except ValueError as e:
-                        logger.error(f"Error initializing SQLChatbot: {str(e)}")
-                        raise HTTPException(status_code=400, detail=str(e))
-                    except Exception as e:
-                        logger.error(
-                            f"Unexpected error initializing SQLChatbot: {str(e)}"
-                        )
-                        raise HTTPException(
-                            status_code=500,
-                            detail="An unexpected error occurred while processing the file.",
-                        )
+                # Initialize SQLChatbot for CSV/XLSX files
+                try:
+                    sanitized_filename = "".join(
+                        e for e in filename if e.isalnum() or e in [".", "_"]
+                    )
+                    sql_chatbot = SQLChatbot(file_path, sanitized_filename)
+                    logger.debug(f"SQLChatbot initialized for {filename}")
+                except ValueError as e:
+                    logger.error(f"Error initializing SQLChatbot: {str(e)}")
+                    raise HTTPException(status_code=400, detail=str(e))
+                except Exception as e:
+                    logger.error(
+                        f"Unexpected error initializing SQLChatbot: {str(e)}"
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail="An unexpected error occurred while processing the file.",
+                    )
 
             except Exception as e:
                 logger.error(f"Error saving uploaded CSV/XLSX file: {e}")
@@ -735,7 +842,6 @@ async def upload_file(
     logger.info(f"File upload completed. File list: {file_list}")
     return {"fileList": file_list, "message": "Files processed successfully"}
 
-
 @app.get("/files/")
 async def get_uploaded_files(
     chat_id: Optional[str] = None,  # Optional chat_id to filter files
@@ -743,8 +849,15 @@ async def get_uploaded_files(
     db: Session = Depends(get_db),
 ):
     """
-    Endpoint to retrieve the list of files uploaded by the current user.
-    If chat_id is provided, filters files for that specific chat.
+    Retrieve the list of files uploaded by the current user.
+
+    Args:
+        chat_id (Optional[str]): Chat session ID to filter files.
+        current_user (User): Authenticated user.
+        db (Session): Database session.
+
+    Returns:
+        dict: List of uploaded files.
     """
     query = db.query(FileModel).filter(FileModel.user_id == current_user.id)
     if chat_id:
@@ -756,13 +869,26 @@ async def get_uploaded_files(
     ]
     return {"fileList": file_list}
 
-
 @app.get("/file/{file_id}")
 async def get_file_data(
     file_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    """
+    Retrieve data or metadata for a specific file.
+
+    Args:
+        file_id (int): File ID.
+        current_user (User): Authenticated user.
+        db (Session): Database session.
+
+    Returns:
+        JSONResponse: File data or metadata.
+
+    Raises:
+        HTTPException: If file is not found or unsupported.
+    """
     logger.info(
         f"Fetching file data for file_id: {file_id}, user_id: {current_user.id}"
     )
@@ -784,6 +910,7 @@ async def get_file_data(
     extension = filename.split(".")[-1].lower()
 
     if extension == "pdf":
+        # Return metadata for PDF files
         metadata_record = (
             db.query(FileMetadata).filter(FileMetadata.file_id == db_file.id).first()
         )
@@ -793,10 +920,11 @@ async def get_file_data(
             )
         return {"metadata": json.loads(metadata_record.file_metadata)}
     elif extension in ["xlsx", "xls", "csv"]:
+        # Return data for CSV/XLSX files
         try:
             if extension in ["xlsx", "xls"]:
                 df = pd.read_excel(filepath)
-            elif extension in ["csv"]:  # csv
+            elif extension == "csv":
                 with open(filepath, "rb") as f:
                     raw_data = f.read()
                 result = chardet.detect(raw_data)
@@ -820,7 +948,6 @@ async def get_file_data(
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
-
 @app.get("/history/{chat_id}")
 async def get_chat_history(
     chat_id: str,
@@ -828,7 +955,18 @@ async def get_chat_history(
     db: Session = Depends(get_db),
 ):
     """
-    Endpoint to retrieve the chat history and associated files for a specific chat session.
+    Retrieve the chat history and associated files for a chat session.
+
+    Args:
+        chat_id (str): Chat session ID.
+        current_user (User): Authenticated user.
+        db (Session): Database session.
+
+    Returns:
+        dict: Chat history and files.
+
+    Raises:
+        HTTPException: If chat is not found.
     """
     db_chat = (
         db.query(ChatHistory)
@@ -856,13 +994,26 @@ async def get_chat_history(
     else:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-
 @app.get("/metadata/{file_id}")
 async def get_metadata(
     file_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    """
+    Retrieve metadata for a specific file.
+
+    Args:
+        file_id (int): File ID.
+        current_user (User): Authenticated user.
+        db (Session): Database session.
+
+    Returns:
+        dict: File metadata.
+
+    Raises:
+        HTTPException: If metadata is not found.
+    """
     try:
         metadata_record = (
             db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
@@ -929,31 +1080,38 @@ async def get_metadata(
             status_code=500, detail="Error fetching metadata. Please try again."
         )
 
-
 # Serve HTML pages
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
+    """
+    Serve the index HTML page.
+    """
     with open("templates/index.html", encoding="UTF-8") as f:
         return f.read()
-
 
 @app.get("/index.html", response_class=HTMLResponse)
 async def read_index_html():
+    """
+    Serve the index HTML page.
+    """
     with open("templates/index.html", encoding="UTF-8") as f:
         return f.read()
 
-
 @app.get("/login.html", response_class=HTMLResponse)
 async def read_login():
+    """
+    Serve the login HTML page.
+    """
     with open("templates/login.html", encoding="UTF-8") as f:
         return f.read()
 
-
 @app.get("/signup.html", response_class=HTMLResponse)
 async def read_signup():
+    """
+    Serve the signup HTML page.
+    """
     with open("templates/signup.html", encoding="UTF-8") as f:
         return f.read()
-
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=3939, reload=True)
