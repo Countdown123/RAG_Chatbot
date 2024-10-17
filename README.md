@@ -1,4 +1,5 @@
 # 🤖 RetrieveR
+<img src="https://github.com/Countdown123/RAG_Chatbot/blob/main/chatbot/static/retriever.png"/>
 
 "RetrieveR is an AI-powered document analysis service that transforms unstructured data into actionable insights through intelligent, real-time interactions."
 
