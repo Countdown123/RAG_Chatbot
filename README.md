@@ -69,11 +69,11 @@ Open http://127.0.0.1:3939/
 
 ## 📸 Screenshots
 <p align="center">
-  <img src="https://github.com/Countdown123/RAG_Chatbot/blob/main/chatbot/static/retriver_screenshot_1.png" width="768" height="381"/>
+  <img src="https://github.com/Countdown123/RAG_Chatbot/blob/main/chatbot/static/retriver_screenshot_1.png"/>
 </p>
 <p align="center">
-  <img src="https://github.com/Countdown123/RAG_Chatbot/blob/main/chatbot/static/retriver_screenshot_3.png" width="768" height="381"/>
+  <img src="https://github.com/Countdown123/RAG_Chatbot/blob/main/chatbot/static/retriver_screenshot_3.png"/>
 </p>
 <p align="center">
-  <img src="https://github.com/Countdown123/RAG_Chatbot/blob/main/chatbot/static/retriver_screenshot_4.png" width="768" height="381"/>
+  <img src="https://github.com/Countdown123/RAG_Chatbot/blob/main/chatbot/static/retriver_screenshot_4.png"/>
 </p>
