@@ -54,8 +54,8 @@ function setupLogoutButton() {
 
 // Initialize WebSocket connection with the token
 function initializeWebSocket(token) {
-    const ws = new WebSocket(`ws://127.0.0.1:3939/ws?token=${token}`);
-    // const ws = new WebSocket(`wss://rag-chatbot-t20p.onrender.com/ws?token=${token}`);
+    // const ws = new WebSocket(`ws://127.0.0.1:3939/ws?token=${token}`);
+    const ws = new WebSocket(`wss://rag-chatbot-t20p.onrender.com/ws?token=${token}`);
     window.ws = ws;
 
     ws.onopen = () => {
